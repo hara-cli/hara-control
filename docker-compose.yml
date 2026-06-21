@@ -1,0 +1,41 @@
+# Phase 1+ deployment: LiteLLM data plane + Postgres, sharing one DB.
+# (Phase 0 spike does NOT need this — it runs LiteLLM via uvx, no Docker.)
+#
+#   cp .env.example .env   # fill UPSTREAM_API_KEY etc.
+#   docker compose up -d
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: hara
+      POSTGRES_PASSWORD: hara
+      POSTGRES_DB: hara_control
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hara -d hara_control"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      UPSTREAM_API_KEY: ${UPSTREAM_API_KEY}
+      UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL}
+      # LiteLLM stores virtual keys + spend in this Postgres — the SAME db the
+      # control plane uses, so the fleet usage view can JOIN spend tables directly.
+      DATABASE_URL: postgresql://hara:hara@postgres:5432/hara_control
+
+  # hara-control (NestJS) — added in Phase 1.

@@ -1,0 +1,15 @@
+Copyright (c) 2026 无锡南荒科技有限公司 (Wuxi Nanhara Technology Co., Ltd.)
+All rights reserved.
+
+This software and its source code are PROPRIETARY and CONFIDENTIAL.
+
+This is NOT open-source software. No license, express or implied, is granted
+to copy, modify, distribute, sublicense, or use this software except under a
+separate written commercial agreement with Nanhara (on-premise license or
+managed-service subscription).
+
+The hara command-line client (https://github.com/hara-cli/hara) is a separate
+product licensed under Apache-2.0; this control plane is not.
+
+Unauthorized copying, distribution, or use of this software, in whole or in
+part, is strictly prohibited.

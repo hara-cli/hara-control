@@ -1,0 +1,28 @@
+# LiteLLM proxy config — the bought/embedded data plane.
+# Two models registered: a local mock (Phase-0, no real key) and the real upstream.
+# Clients select via the "model" field in the /v1/messages request body.
+
+model_list:
+  # ── Phase-0 spike target: local OpenAI-compatible mock, no real key ──
+  - model_name: glm-mock
+    litellm_params:
+      model: openai/glm-mock
+      api_base: http://localhost:8899/v1
+      api_key: mock-not-a-real-key
+
+  # ── Real upstream (regular DashScope compatible-mode, NOT the sk-sp- coding plan) ──
+  - model_name: glm-5
+    litellm_params:
+      model: openai/qwen-plus
+      api_base: os.environ/UPSTREAM_BASE_URL
+      api_key: os.environ/UPSTREAM_API_KEY
+
+litellm_settings:
+  drop_params: true
+  # Route Anthropic /v1/messages through OpenAI /chat/completions, NOT the Responses API.
+  # Required: OpenAI-compatible upstreams (DashScope/Qwen/GLM compatible-mode) only expose
+  # /chat/completions, not /v1/responses. Without this, /v1/messages 404s against them.
+  use_chat_completions_url_for_anthropic_messages: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

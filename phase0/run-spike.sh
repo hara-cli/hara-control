@@ -12,6 +12,7 @@ export LITELLM_PORT="${LITELLM_PORT:-4000}"
 # keep the real-upstream config entry loadable without a real key (it won't be exercised)
 export UPSTREAM_API_KEY="${UPSTREAM_API_KEY:-spike-unused}"
 export UPSTREAM_BASE_URL="${UPSTREAM_BASE_URL:-http://localhost:${MOCK_UPSTREAM_PORT}/v1}"
+export HARA_MOCK_BASE="${HARA_MOCK_BASE:-http://localhost:${MOCK_UPSTREAM_PORT}/v1}"
 
 mkdir -p phase0/.run
 MOCK_PID="" LITE_PID=""

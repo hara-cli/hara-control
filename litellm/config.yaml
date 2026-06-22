@@ -7,7 +7,8 @@ model_list:
   - model_name: glm-mock
     litellm_params:
       model: openai/glm-mock
-      api_base: http://localhost:8899/v1
+      # host/uvx: http://localhost:8899/v1 ; in Docker: http://host.docker.internal:8899/v1
+      api_base: os.environ/HARA_MOCK_BASE
       api_key: mock-not-a-real-key
 
   # ── Real upstream (regular DashScope compatible-mode, NOT the sk-sp- coding plan) ──

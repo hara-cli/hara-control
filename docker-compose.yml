@@ -11,7 +11,9 @@ services:
       POSTGRES_PASSWORD: hara
       POSTGRES_DB: hara_control
     ports:
-      - "5432:5432"
+      # 5433 on the host avoids clashing with a local/system Postgres on 5432
+      # (on macOS `localhost` resolves to ::1 first and would hit the native one).
+      - "5433:5432"
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
     healthcheck:

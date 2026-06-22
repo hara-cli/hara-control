@@ -56,8 +56,27 @@ upstreams incl. cloud + customer self-hosted vLLM/Ollama, streaming, retries, up
 
 ## Status
 
-**Phase 0 — spike.** Validating the #1 risk before writing any Nest code: does LiteLLM proxy the
-Anthropic `/v1/messages` format with **streaming + tool calls** end-to-end? See [`phase0/`](./phase0/).
+- **Phase 0 — spike: ✅ done.** LiteLLM proxies Anthropic `/v1/messages` with streaming + tool calls
+  end-to-end (see [`phase0/`](./phase0/)).
+- **Phase 1 — MVP: 🟡 scaffolded.** NestJS + Prisma + Postgres. Endpoints: `POST /v1/enroll`,
+  `POST /v1/heartbeat` (device-facing, matches the CLI contract); `POST /admin/orgs`,
+  `POST /admin/enroll-codes`, `GET /admin/fleet`, `POST /admin/devices/:id/revoke` (admin-key gated).
+  Device tokens are gateway virtual keys behind the `GatewayAdapter` seam (LiteLLM in prod, an
+  in-process mock for dev/test); only token **hashes** are stored. Enroll-flow logic is unit-tested
+  offline (`npm test`, 3/3). **Pending:** `prisma migrate` + live e2e against Postgres, LiteLLM
+  adapter live test.
 
-Roadmap: Phase 0 spike → Phase 1 MVP (enroll + token issue/revoke + read-only fleet) → Phase 2
-hardening (OIDC/SSO, audit, RBAC) → Phase 3 multi-tenant SaaS.
+### Run Phase 1 locally
+
+```bash
+cp .env.example .env                 # set HARA_CONTROL_ADMIN_KEY etc.
+docker compose up -d postgres        # needs Docker running
+npx prisma migrate dev --name init   # create tables
+npm run start:dev                    # control plane on :4100
+# smoke:
+curl -X POST localhost:4100/admin/orgs -H 'x-admin-key: admin-dev-change-me' \
+  -H 'content-type: application/json' -d '{"name":"acme"}'
+```
+
+Roadmap: ~~Phase 0 spike~~ → **Phase 1 MVP** (here) → Phase 2 hardening (OIDC/SSO, audit, RBAC) →
+Phase 3 multi-tenant SaaS.

@@ -1,0 +1,85 @@
+// hara-control data model. PostgreSQL (shared with the LiteLLM data plane so the fleet
+// usage view can JOIN device records against LiteLLM's spend tables — no cross-DB ETL).
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  enrollCodes EnrollCode[]
+  devices     Device[]
+  auditLogs   AuditLog[]
+}
+
+/// One-time enrollment code an admin hands to a machine. Exchanged at POST /v1/enroll.
+model EnrollCode {
+  id        String    @id @default(uuid())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId     String
+  code      String    @unique
+  model     String    @default("") // model alias the gateway routes this device to
+  baseUrl   String?               // explicit OpenAI-compatible base; else <gateway>/v1
+  expiresAt DateTime
+  usedAt    DateTime?             // single-use: set when redeemed
+  createdAt DateTime  @default(now())
+
+  device Device?
+
+  @@index([orgId])
+}
+
+model Device {
+  id          String   @id @default(uuid())
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId       String
+  name        String
+  os          String   @default("")
+  haraVersion String   @default("")
+  enrolledAt  DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  enrollCode   EnrollCode? @relation(fields: [enrollCodeId], references: [id])
+  enrollCodeId String?     @unique
+
+  tokens DeviceToken[]
+
+  @@index([orgId])
+}
+
+/// A scoped, revocable device token. The token value itself is a gateway (LiteLLM) virtual
+/// key minted via the GatewayAdapter; we store only its hash (for heartbeat auth lookup) and
+/// the gateway key id (for revoke). The real provider key never lives on the device or here.
+model DeviceToken {
+  id           String    @id @default(uuid())
+  device       Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId     String
+  tokenHash    String    @unique // sha256 of the issued token
+  gatewayKeyId String              // id returned by the gateway adapter, used to revoke
+  model        String    @default("")
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+
+  @@index([deviceId])
+}
+
+/// Append-only audit trail. payload is JSONB (policy/context), queryable in Postgres.
+model AuditLog {
+  id        String   @id @default(uuid())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId     String
+  action    String   // e.g. "enroll", "revoke", "enroll_code.create"
+  actorType String   // "admin" | "device" | "system"
+  actorId   String   @default("")
+  payload   Json     @default("{}")
+  at        DateTime @default(now())
+
+  @@index([orgId, at])
+}

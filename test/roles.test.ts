@@ -5,8 +5,10 @@ import assert from "node:assert/strict";
 import { RolesService, mergePolicy } from "../src/roles/roles.service";
 import type { PrismaService } from "../src/prisma/prisma.service";
 import type { AuditService } from "../src/audit/audit.service";
+import type { EntitlementService } from "../src/license/license.service";
 
 const fakeAudit = { log: async () => {} } as unknown as AuditService;
+const fakeEntitlement = { assert: () => {}, seatCheck: async () => {} } as unknown as EntitlementService;
 
 const rolesServiceWith = (data: {
   device?: unknown;
@@ -20,7 +22,7 @@ const rolesServiceWith = (data: {
     team: { findMany: async () => data.teams ?? [] },
     deviceToken: { findUnique: async () => data.deviceToken ?? null },
   } as unknown as PrismaService;
-  return new RolesService(prisma, fakeAudit);
+  return new RolesService(prisma, fakeAudit, fakeEntitlement);
 };
 
 const role = (key: string, over: Record<string, unknown> = {}) => ({

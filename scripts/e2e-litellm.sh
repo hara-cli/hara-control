@@ -14,6 +14,7 @@ export HARA_CONTROL_ADMIN_KEY="admin-dev-e2e"
 export LITELLM_URL="http://localhost:4000"
 export GATEWAY_ADAPTER="litellm"
 export PORT="4100"
+export HARA_LICENSE_DEV=1 # self-mode dev bypass (no license needed for CI/e2e)
 export MOCK_UPSTREAM_PORT="8899"
 # NOTE: do NOT export HARA_MOCK_BASE / UPSTREAM_BASE_URL here — let docker-compose default them to
 # host.docker.internal so the *container* reaches the host mock (localhost would point inside the container).

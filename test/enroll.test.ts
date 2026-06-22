@@ -52,8 +52,9 @@ function fakePrisma() {
 }
 
 const fakeAudit = { log: async () => {} } as unknown as AuditService;
+const fakeEntitlement = { assert: () => {}, seatCheck: async () => {} } as unknown as import("../src/license/license.service").EntitlementService;
 const svcFor = (prisma: ReturnType<typeof fakePrisma>) =>
-  new EnrollService(prisma as unknown as PrismaService, fakeAudit, new MockGatewayAdapter());
+  new EnrollService(prisma as unknown as PrismaService, fakeAudit, new MockGatewayAdapter(), fakeEntitlement);
 
 test("enroll: valid code -> device token; code is single-use", async () => {
   const prisma = fakePrisma();

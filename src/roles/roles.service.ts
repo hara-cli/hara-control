@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, UnauthorizedException } from "@nestjs/co
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { EntitlementService } from "../license/license.service";
 import { sha256 } from "../common/crypto";
 
 /** Governance policy carried at org / team / assignment levels and merged (org < team < assignment). */
@@ -50,10 +51,15 @@ export type RoleInput = {
 
 @Injectable()
 export class RolesService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly entitlement: EntitlementService,
+  ) {}
 
   // ── roles (digital-employee templates) ──────────────────────────────────
   async createRole(orgId: string, input: RoleInput) {
+    this.entitlement.assert("agent-org"); // B3 is a licensed feature
     const role = await this.prisma.role.create({
       data: {
         orgId,

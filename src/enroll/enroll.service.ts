@@ -2,6 +2,7 @@ import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { GATEWAY_ADAPTER, GatewayAdapter } from "../gateway/gateway-adapter";
+import { EntitlementService } from "../license/license.service";
 import { sha256 } from "../common/crypto";
 import { DeviceInfoDto } from "../protocol/dto";
 
@@ -11,6 +12,7 @@ export class EnrollService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     @Inject(GATEWAY_ADAPTER) private readonly gateway: GatewayAdapter,
+    private readonly entitlement: EntitlementService,
   ) {}
 
   /** Exchange a one-time code for a scoped device token (a gateway virtual key). */
@@ -19,6 +21,7 @@ export class EnrollService {
     if (!ec || ec.usedAt || ec.expiresAt.getTime() < now.getTime()) {
       throw new UnauthorizedException("bad or expired code");
     }
+    await this.entitlement.seatCheck(ec.orgId); // licensed seat cap
 
     const dev = await this.prisma.device.create({
       data: {

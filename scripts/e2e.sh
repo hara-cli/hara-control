@@ -8,6 +8,7 @@ export DATABASE_URL="postgresql://hara:hara@localhost:5433/hara_control?schema=p
 export HARA_CONTROL_ADMIN_KEY="admin-dev-e2e"
 export GATEWAY_ADAPTER="mock"
 export PORT=4100
+export HARA_LICENSE_DEV=1 # self-mode dev bypass (no license needed for CI/e2e)
 
 SRV=""
 cleanup() { [ -n "$SRV" ] && kill "$SRV" 2>/dev/null || true; }

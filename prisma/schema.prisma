@@ -1,12 +1,14 @@
 // hara-control data model. PostgreSQL (shared with the LiteLLM data plane so the fleet
 // usage view can JOIN device records against LiteLLM's spend tables — no cross-DB ETL).
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector] // pgvector — org-asset semantic search (P0)
 }
 
 model Organization {
@@ -272,6 +274,11 @@ model AssetVersion {
   redactions      String[] @default([]) // what the guard stripped on contribute (audit)
   createdByDeviceId String?
   createdAt       DateTime @default(now())
+  // semantic search (P0). dim is unbounded so the embedding model is configurable (local/remote);
+  // {embedModel,embedDim} track which model produced it so search only compares like-for-like.
+  embedding       Unsupported("vector")?
+  embedModel      String?
+  embedDim        Int?
 
   @@index([assetId, createdAt])
   @@index([contentHash])

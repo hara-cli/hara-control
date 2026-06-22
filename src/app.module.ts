@@ -7,8 +7,9 @@ import { AdminModule } from "./admin/admin.module";
 import { RolesModule } from "./roles/roles.module";
 import { LicenseModule } from "./license/license.module";
 import { AssetsModule } from "./assets/assets.module";
+import { EmbeddingModule } from "./embed/embedding.module";
 
 @Module({
-  imports: [PrismaModule, GatewayModule, AuditModule, LicenseModule, EnrollModule, AdminModule, RolesModule, AssetsModule],
+  imports: [PrismaModule, GatewayModule, AuditModule, LicenseModule, EmbeddingModule, EnrollModule, AdminModule, RolesModule, AssetsModule],
 })
 export class AppModule {}

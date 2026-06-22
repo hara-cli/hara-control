@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { AssetKind, AssetScope } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { EntitlementService } from "../license/license.service";
+import { EmbeddingService } from "../embed/embedding.service";
 import { sha256 } from "../common/crypto";
 import { redactSecrets, scanForInjection } from "./guard";
 
@@ -23,10 +24,13 @@ export type ContributeInput = {
 
 @Injectable()
 export class AssetsService {
+  private readonly log = new Logger(AssetsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly entitlement: EntitlementService,
+    private readonly embedding: EmbeddingService,
   ) {}
 
   private async deviceFromBearer(bearer?: string) {
@@ -100,20 +104,73 @@ export class AssetsService {
     return { id: asset.id, kind: asset.kind, scope: asset.scope, slug: asset.slug, body: asset.versions[0].body, content_hash: asset.versions[0].contentHash };
   }
 
-  /** Lexical search (CLI doctrine): word matches in the denormalized haystack, ranked by scope tier. */
+  /** Hybrid search: lexical word-match ⊕ vector ANN (pgvector, when an embedder is configured),
+   *  fused by Reciprocal Rank Fusion and weighted by scope tier. Degrades to pure lexical (the
+   *  zero-dep floor) when embeddings are off. */
   async search(bearer: string | undefined, opts: { query: string; kind?: AssetKind; limit?: number }) {
     const device = await this.deviceFromBearer(bearer);
+    const orgId = device.orgId;
     const words = opts.query.toLowerCase().split(/\s+/).filter(Boolean);
+
     const candidates = await this.prisma.asset.findMany({
-      where: { orgId: device.orgId, lifecycle: "PUBLISHED", ...(opts.kind ? { kind: opts.kind } : {}) },
+      where: { orgId, lifecycle: "PUBLISHED", ...(opts.kind ? { kind: opts.kind } : {}) },
       take: 500,
     });
-    return candidates
-      .map((a) => ({ a, score: words.filter((w) => a.searchText.includes(w)).length }))
+    const byId = new Map(candidates.map((a) => [a.id, a]));
+
+    const lexRanked = candidates
+      .map((a) => ({ id: a.id, score: words.filter((w) => a.searchText.includes(w)).length }))
       .filter((s) => s.score > 0)
-      .sort((x, y) => SCOPE_TIER[y.a.scope] - SCOPE_TIER[x.a.scope] || y.score - x.score || x.a.slug.length - y.a.slug.length)
+      .sort((x, y) => y.score - x.score || byId.get(x.id)!.slug.length - byId.get(y.id)!.slug.length)
+      .map((s) => s.id);
+
+    let vecRanked: string[] = [];
+    if (this.embedding.enabled()) {
+      try {
+        const qvec = await this.embedding.embedOne(opts.query);
+        if (qvec) {
+          const rows = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+            `SELECT a.id FROM "Asset" a
+               JOIN LATERAL (SELECT embedding, "embedModel" FROM "AssetVersion"
+                             WHERE "assetId" = a.id ORDER BY "createdAt" DESC LIMIT 1) v ON true
+              WHERE a."orgId" = $1 AND a.lifecycle = 'PUBLISHED'
+                AND v.embedding IS NOT NULL AND v."embedModel" = $2
+              ORDER BY v.embedding <=> $3::vector ASC LIMIT 50`,
+            orgId, this.embedding.modelId(), EmbeddingService.toVectorLiteral(qvec),
+          );
+          vecRanked = rows.map((r) => r.id).filter((id) => byId.has(id));
+        }
+      } catch (e) {
+        this.log.warn(`vector search failed, lexical only: ${(e as Error).message}`);
+      }
+    }
+
+    // RRF fuse the two ranked lists, then weight by scope tier (more-local wins).
+    const fused = new Map<string, number>();
+    const fuse = (ids: string[]) => ids.forEach((id, i) => fused.set(id, (fused.get(id) ?? 0) + 1 / (60 + i)));
+    fuse(lexRanked);
+    fuse(vecRanked);
+
+    return [...fused.entries()]
+      .map(([id, rrf]) => ({ a: byId.get(id)!, score: rrf * (SCOPE_TIER[byId.get(id)!.scope] || 1) }))
+      .sort((x, y) => y.score - x.score)
       .slice(0, opts.limit ?? 10)
       .map(({ a, score }) => ({ id: a.id, kind: a.kind, scope: a.scope, slug: a.slug, title: a.title, score }));
+  }
+
+  /** Embed an asset version's haystack at publish (best-effort; lexical still works if it fails). */
+  private async embedOnPublish(versionId: string, haystack: string): Promise<void> {
+    if (!this.embedding.enabled()) return;
+    try {
+      const vec = await this.embedding.embedOne(haystack);
+      if (!vec) return;
+      await this.prisma.$executeRawUnsafe(
+        `UPDATE "AssetVersion" SET embedding = $1::vector, "embedModel" = $2, "embedDim" = $3 WHERE id = $4`,
+        EmbeddingService.toVectorLiteral(vec), this.embedding.modelId(), vec.length, versionId,
+      );
+    } catch (e) {
+      this.log.warn(`embed-on-publish failed (lexical search still works): ${(e as Error).message}`);
+    }
   }
 
   // ── admin: review / promote / deprecate (egress + lifecycle governance) ─────────────────
@@ -127,10 +184,12 @@ export class AssetsService {
       return { lifecycle: "DRAFT" };
     }
     const body = asset.versions[0]?.body ?? "";
+    const haystack = this.searchTextFor(asset.title, asset.tags, asset.lang, body);
     await this.prisma.asset.update({
       where: { id: assetId },
-      data: { lifecycle: "PUBLISHED", searchText: this.searchTextFor(asset.title, asset.tags, asset.lang, body) },
+      data: { lifecycle: "PUBLISHED", searchText: haystack },
     });
+    if (asset.versions[0]) await this.embedOnPublish(asset.versions[0].id, haystack);
     await this.audit.log(asset.orgId, "asset.review", "admin", assetId, { decision });
     return { lifecycle: "PUBLISHED" };
   }

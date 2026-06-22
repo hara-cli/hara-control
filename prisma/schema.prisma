@@ -22,6 +22,7 @@ model Organization {
   teams            Team[]
   persons          Person[]
   digitalEmployees DigitalEmployee[]
+  assets           Asset[]
 }
 
 /// One-time enrollment code an admin hands to a machine. Exchanged at POST /v1/enroll.
@@ -137,6 +138,7 @@ model Team {
 
   members     PersonTeam[]
   assignments DigitalEmployee[]
+  assets      Asset[]
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -189,4 +191,88 @@ model DigitalEmployee {
   @@index([roleId])
   @@index([personId])
   @@index([teamId])
+}
+
+// ── B2: multi-dimensional code-asset / knowledge management ────────────────────────────────
+
+// project stays device-only and is never uploaded; PERSONAL..PUBLIC are the server-side scopes
+enum AssetScope {
+  PERSONAL
+  TEAM
+  ORG
+  PUBLIC
+}
+
+enum AssetKind {
+  SKILL
+  SNIPPET
+  PLAYBOOK
+  CONVENTION
+}
+
+enum AssetLifecycle {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  DEPRECATED
+}
+
+enum TrustTier {
+  ORG_VERIFIED
+  ORG
+  COMMUNITY
+  UNVERIFIED
+}
+
+enum AssetOrigin {
+  AUTHORED
+  PROMOTED
+  IMPORTED
+}
+
+/// A unit of shared org knowledge (skill/snippet/playbook). Stable identity + the dimensions;
+/// the current markdown lives in the latest AssetVersion. Markdown-as-SSOT, same as the CLI.
+model Asset {
+  id        String         @id @default(uuid())
+  org       Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId     String
+  team      Team?          @relation(fields: [teamId], references: [id])
+  teamId    String? // null = org-wide; set = team-scoped
+  ownerDeviceId String? // provenance: which device captured it (Person identity is Phase-2b)
+  scope     AssetScope // ── dimension: visibility / egress spine
+  kind      AssetKind // ── dimension: routing spine
+  lifecycle AssetLifecycle @default(DRAFT)
+  trustTier TrustTier      @default(ORG)
+  origin    AssetOrigin    @default(AUTHORED)
+  slug      String // kebab id; the skill `name` for SKILLs
+  title     String         @default("")
+  lang      String?
+  tags      String[]       @default([])
+  sourceUrl String? // provenance for IMPORTED
+  promotedFromId String? // the asset this was copied-forward from on a scope promotion
+  supersededById String?
+  searchText String        @default("") // denormalized lexical haystack (title+tags+lang+published body)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  versions AssetVersion[]
+
+  @@unique([orgId, scope, teamId, kind, slug])
+  @@index([orgId, scope, lifecycle])
+  @@index([orgId, kind])
+}
+
+/// Immutable content version — the markdown SSOT. Publishing a change appends a row.
+model AssetVersion {
+  id              String   @id @default(uuid())
+  asset           Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId         String
+  body            String // the byte-exact markdown (frontmatter + content)
+  contentHash     String // sha256(body) — dedup + sync etag
+  redactions      String[] @default([]) // what the guard stripped on contribute (audit)
+  createdByDeviceId String?
+  createdAt       DateTime @default(now())
+
+  @@index([assetId, createdAt])
+  @@index([contentHash])
 }

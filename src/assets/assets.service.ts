@@ -17,6 +17,7 @@ export type ContributeInput = {
   teamId?: string;
   slug: string;
   title?: string;
+  summary?: string;
   lang?: string;
   tags?: string[];
   body: string;
@@ -40,8 +41,8 @@ export class AssetsService {
     return dt.device;
   }
 
-  private searchTextFor(title: string, tags: string[], lang: string | null, body: string): string {
-    return [title, tags.join(" "), lang ?? "", body].join("\n").toLowerCase();
+  private searchTextFor(title: string, summary: string | null, tags: string[], lang: string | null, body: string): string {
+    return [title, summary ?? "", tags.join(" "), lang ?? "", body].join("\n").toLowerCase();
   }
 
   // ── device: contribute (capture → guard → IN_REVIEW; NEVER auto-publishes) ──────────────
@@ -60,12 +61,13 @@ export class AssetsService {
     const existing = await this.prisma.asset.findFirst({
       where: { orgId, scope: input.scope, teamId: input.teamId ?? null, kind: input.kind, slug: input.slug },
     });
+    const summary = input.summary ?? null;
     const asset = existing
-      ? await this.prisma.asset.update({ where: { id: existing.id }, data: { lifecycle: "IN_REVIEW", title, lang: input.lang ?? null, tags } })
+      ? await this.prisma.asset.update({ where: { id: existing.id }, data: { lifecycle: "IN_REVIEW", title, summary, lang: input.lang ?? null, tags } })
       : await this.prisma.asset.create({
           data: {
             orgId, scope: input.scope, teamId: input.teamId ?? null, kind: input.kind, slug: input.slug,
-            title, lang: input.lang ?? null, tags, lifecycle: "IN_REVIEW", origin: "AUTHORED", ownerDeviceId: device.id,
+            title, summary, lang: input.lang ?? null, tags, lifecycle: "IN_REVIEW", origin: "AUTHORED", ownerDeviceId: device.id,
           },
         });
     const version = await this.prisma.assetVersion.create({
@@ -184,7 +186,7 @@ export class AssetsService {
       return { lifecycle: "DRAFT" };
     }
     const body = asset.versions[0]?.body ?? "";
-    const haystack = this.searchTextFor(asset.title, asset.tags, asset.lang, body);
+    const haystack = this.searchTextFor(asset.title, asset.summary, asset.tags, asset.lang, body);
     await this.prisma.asset.update({
       where: { id: assetId },
       data: { lifecycle: "PUBLISHED", searchText: haystack },

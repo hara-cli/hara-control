@@ -210,6 +210,7 @@ enum AssetKind {
   SNIPPET
   PLAYBOOK
   CONVENTION
+  KNOWLEDGE // reference docs / how-tos / domain knowledge (the 知识库 facet — same store)
 }
 
 enum AssetLifecycle {
@@ -248,6 +249,7 @@ model Asset {
   origin    AssetOrigin    @default(AUTHORED)
   slug      String // kebab id; the skill `name` for SKILLs
   title     String         @default("")
+  summary   String? // one-line index (uniform progressive-disclosure label for every kind)
   lang      String?
   tags      String[]       @default([])
   sourceUrl String? // provenance for IMPORTED

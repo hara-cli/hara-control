@@ -7,6 +7,7 @@ export class ContributeDto {
   @IsString() @IsOptional() teamId?: string;
   @IsString() @IsNotEmpty() slug!: string;
   @IsString() @IsOptional() title?: string;
+  @IsString() @IsOptional() summary?: string;
   @IsString() @IsOptional() lang?: string;
   @IsArray() @IsString({ each: true }) @IsOptional() tags?: string[];
   @IsString() @IsNotEmpty() body!: string;

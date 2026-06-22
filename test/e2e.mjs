@@ -132,6 +132,27 @@ const ok = (c, m) => { if (!c) throw new Error(`assertion failed: ${m}`); };
   ok(khits.length === 1 && khits[0].kind === "KNOWLEDGE" && khits[0].slug === "oncall-runbook", `KNOWLEDGE doc searchable as its own kind, summary indexed (got ${JSON.stringify(khits)})`);
   console.log("  · B2 ok: contribute(redacts secret)->IN_REVIEW->review->publish->search/get; injection blocked; KNOWLEDGE kind + summary");
 
-  console.log("PHASE-1 E2E PASS: org -> code -> enroll -> heartbeat -> fleet -> revoke + auth guards + B3 roles + B2 assets");
+  // ── ④ work-behavior 留痕 (WorkSession) ──
+  const t0 = new Date(0).toISOString();
+  r = await deviceReq("/v1/events", { sessions: [
+    { seq: 1, startedAt: t0, kind: "CODING", repoHash: "repohash", outcome: "COMMITTED", tasksCount: 3, toolCalls: { edit: 5, bash: 2 }, filePathsHashed: ["h1", "h2"] },
+    { seq: 2, startedAt: t0, kind: "REVIEW", repoHash: "repohash", outcome: "ABANDONED", taskTitle: "review with sk-abcdefghij0123456789 in it" },
+  ] }, tok);
+  ok(r.status === 202, `events ingest -> 202 (got ${r.status})`);
+  ok((await r.json()).ingested === 2, "ingested 2 work sessions");
+  r = await deviceReq("/v1/events", { sessions: [{ seq: 1, startedAt: t0 }] }, tok); // re-post seq 1
+  ok((await r.json()).skipped === 1, "re-posting a seen seq is idempotent (skipped)");
+
+  r = await adminReq(`/admin/work?orgId=${org.id}`, null, "GET");
+  ok(r.ok, `work list -> ${r.status}`);
+  const sessions = await r.json();
+  ok(sessions.length >= 2, `work sessions recorded (got ${sessions.length})`);
+  const s1 = sessions.find((s) => s.seq === 1);
+  const s2 = sessions.find((s) => s.seq === 2);
+  ok(s2.taskTitle.includes("<REDACTED:sk-key>") && !s2.taskTitle.includes("sk-abcdefghij"), "taskTitle secret redacted on ingest");
+  ok(s1 && s2 && s2.prevHash === s1.rowHash && s1.rowHash.length === 64, "tamper-evidence chain: seq-2.prevHash == seq-1.rowHash");
+  console.log("  · ④ work留痕 ok: /v1/events ingest (idempotent) + taskTitle redacted + tamper-evidence hash chain + admin view");
+
+  console.log("PHASE-1 E2E PASS: org -> enroll -> fleet -> revoke + guards + B3 roles + B2 assets + B0 work-audit");
   process.exit(0);
 })().catch((e) => { console.error(`PHASE-1 E2E FAIL: ${e.message}`); process.exit(1); });

@@ -25,6 +25,8 @@ model Organization {
   persons          Person[]
   digitalEmployees DigitalEmployee[]
   assets           Asset[]
+  workSessions     WorkSession[]
+  workEvents       WorkEvent[]
 }
 
 /// One-time enrollment code an admin hands to a machine. Exchanged at POST /v1/enroll.
@@ -66,7 +68,8 @@ model Device {
   person   Person? @relation(fields: [personId], references: [id])
   personId String?
 
-  tokens DeviceToken[]
+  tokens       DeviceToken[]
+  workSessions WorkSession[]
 
   @@index([orgId])
   @@index([personId])
@@ -154,10 +157,11 @@ model Person {
   name      String       @default("")
   createdAt DateTime     @default(now())
 
-  teams       PersonTeam[]
-  devices     Device[]
-  enrollCodes EnrollCode[]
-  assignments DigitalEmployee[]
+  teams        PersonTeam[]
+  devices      Device[]
+  enrollCodes  EnrollCode[]
+  assignments  DigitalEmployee[]
+  workSessions WorkSession[]
 
   @@unique([orgId, email])
   @@index([orgId])
@@ -284,4 +288,80 @@ model AssetVersion {
 
   @@index([assetId, createdAt])
   @@index([contentHash])
+}
+
+// ── B-end work-behavior 留痕 (audit expert) — a durable, append-only record of one principal's work,
+// metadata-only by default. Distinct from AuditLog (governance events). Feeds compliance + 周公. ──────
+
+enum WorkSessionKind {
+  CODING
+  REVIEW
+  AGENT_RUN
+  CHAT
+}
+
+enum WorkOutcome {
+  COMMITTED
+  ABANDONED
+  BLOCKED
+  ERROR
+  UNKNOWN
+}
+
+/// One principal's hara session, summarized. Metadata-only at T0 (paths hashed, no code bodies).
+model WorkSession {
+  id        String       @id @default(uuid())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId     String
+  device    Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId  String
+  person    Person?      @relation(fields: [personId], references: [id])
+  personId  String? // authoritative — the device reports only what its bound identity did
+  roleKey   String          @default("") // which digital-employee/persona was active
+
+  kind      WorkSessionKind @default(CODING)
+  repoHash  String          @default("") // sha256(remote||root) — never the path
+  taskTitle String          @default("") // T1+ only; redacted via the guard
+  toolCalls Json            @default("{}") // {edit:42, bash:11, agent:3}
+  tasksCount         Int    @default(0)
+  filesTouched       Int    @default(0)
+  filePathsHashed    String[] @default([]) // sha256(path)[]
+  approvalsRequested Int    @default(0)
+  approvalsGranted   Int    @default(0)
+  outcome   WorkOutcome     @default(UNKNOWN)
+  commitShas String[]       @default([])
+
+  model     String  @default("")
+  tokensIn  Int     @default(0)
+  tokensOut Int     @default(0)
+  costUsd   Float? // reconciled from LiteLLM spend by deviceId (don't trust the client)
+  latencyMs Int     @default(0)
+
+  startedAt DateTime
+  endedAt   DateTime?
+  at        DateTime @default(now()) // received
+  seq       Int // per-device monotonic — idempotent batch ingest
+  prevHash  String   @default("") // tamper-evidence chain (per device)
+  rowHash   String   @default("") // sha256(canonical(this) + prevHash)
+
+  events WorkEvent[]
+
+  @@unique([deviceId, seq]) // idempotent ingest
+  @@index([orgId, at]) // compliance "who did what when"
+  @@index([orgId, personId, startedAt]) // per-person timeline + 周公 feed
+  @@index([orgId, repoHash])
+}
+
+/// Optional notable sub-event (denial / approval / guardrail trip / role switch). Append-only.
+model WorkEvent {
+  id        String      @id @default(uuid())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId     String
+  session   WorkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+  type      String // "tool.denied" | "approval" | "guardrail.trip" | "role.switch"
+  payload   Json        @default("{}") // redacted; labels mirror AssetVersion.redactions
+  at        DateTime    @default(now())
+
+  @@index([orgId, sessionId])
 }

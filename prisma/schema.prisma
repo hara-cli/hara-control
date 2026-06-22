@@ -12,11 +12,16 @@ datasource db {
 model Organization {
   id        String   @id @default(uuid())
   name      String
+  policy    Json     @default("{}") // org-level governance: modelDeny / requireApprovalForWrites / toolDeny / budget
   createdAt DateTime @default(now())
 
-  enrollCodes EnrollCode[]
-  devices     Device[]
-  auditLogs   AuditLog[]
+  enrollCodes      EnrollCode[]
+  devices          Device[]
+  auditLogs        AuditLog[]
+  roles            Role[]
+  teams            Team[]
+  persons          Person[]
+  digitalEmployees DigitalEmployee[]
 }
 
 /// One-time enrollment code an admin hands to a machine. Exchanged at POST /v1/enroll.
@@ -30,6 +35,11 @@ model EnrollCode {
   expiresAt DateTime
   usedAt    DateTime?             // single-use: set when redeemed
   createdAt DateTime  @default(now())
+
+  // per-person enroll: binds the enrolled device to a Person so it inherits that person's
+  // digital-employee assignments from the first heartbeat (authoritative binding).
+  person   Person? @relation(fields: [personId], references: [id])
+  personId String?
 
   device Device?
 
@@ -45,13 +55,18 @@ model Device {
   haraVersion String   @default("")
   enrolledAt  DateTime @default(now())
   lastSeenAt  DateTime @default(now())
+  roleVersion Int      @default(0) // watermark: bumped when this device's resolved role bundle changes
 
   enrollCode   EnrollCode? @relation(fields: [enrollCodeId], references: [id])
   enrollCodeId String?     @unique
 
+  person   Person? @relation(fields: [personId], references: [id])
+  personId String?
+
   tokens DeviceToken[]
 
   @@index([orgId])
+  @@index([personId])
 }
 
 /// A scoped, revocable device token. The token value itself is a gateway (LiteLLM) virtual
@@ -82,4 +97,96 @@ model AuditLog {
   at        DateTime @default(now())
 
   @@index([orgId, at])
+}
+
+// ── B3: agent / digital-employee / role-assignment governance ──────────────────────────────
+
+/// Org-defined reusable persona — the control-plane authority for a CLI Role
+/// (mirrors hara-cli src/org/roles.ts: key/description/owns/rejects/model/allowTools/denyTools/system).
+/// This is the "job description" template; a DigitalEmployee is an instance of it bound to a principal.
+model Role {
+  id          String       @id @default(uuid())
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId       String
+  key         String // the role id the CLI sees as `name` in frontmatter (e.g. "reviewer")
+  description String       @default("")
+  owns        String[]     @default([]) // routing OWN keywords
+  rejects     String[]     @default([]) // routing REJECT keywords
+  model       String? // optional model override (subject to org/team model allow-list)
+  allowTools  String[]     @default([])
+  denyTools   String[]     @default([])
+  system      String       @default("") // persona/system body (markdown)
+  version     Int          @default(1) // bumped on edit → drives device resync
+  archivedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  assignments DigitalEmployee[]
+
+  @@unique([orgId, key])
+  @@index([orgId])
+}
+
+model Team {
+  id        String       @id @default(uuid())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId     String
+  name      String
+  policy    Json         @default("{}") // team governance: modelDeny / requireApprovalForWrites / toolDeny / budget
+  createdAt DateTime     @default(now())
+
+  members     PersonTeam[]
+  assignments DigitalEmployee[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+model Person {
+  id        String       @id @default(uuid())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId     String
+  email     String // becomes the OIDC subject in Phase 2
+  name      String       @default("")
+  createdAt DateTime     @default(now())
+
+  teams       PersonTeam[]
+  devices     Device[]
+  enrollCodes EnrollCode[]
+  assignments DigitalEmployee[]
+
+  @@unique([orgId, email])
+  @@index([orgId])
+}
+
+model PersonTeam {
+  person   Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+  personId String
+  team     Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId   String
+
+  @@id([personId, teamId])
+}
+
+/// A "digital employee" = a Role instance granted to a Person and/or Team. The unit the admin
+/// counts ("who has which agents"). Resolution: a device's Person + their Teams' grants → role set.
+model DigitalEmployee {
+  id        String       @id @default(uuid())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId     String
+  role      Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  roleId    String
+  person    Person?      @relation(fields: [personId], references: [id], onDelete: Cascade)
+  personId  String?
+  team      Team?        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    String?
+  name      String       @default("") // display name, e.g. "Payments Reviewer"
+  status    String       @default("active") // active | suspended
+  policy    Json         @default("{}") // per-assignment overrides (merges over org < team < assignment)
+  createdAt DateTime     @default(now())
+
+  @@index([orgId])
+  @@index([roleId])
+  @@index([personId])
+  @@index([teamId])
 }

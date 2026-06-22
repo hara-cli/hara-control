@@ -18,11 +18,18 @@ export class AdminService {
     return this.prisma.organization.create({ data: { name } });
   }
 
-  async createEnrollCode(orgId: string, model = "", baseUrl?: string, ttlMinutes = 60, now = new Date()) {
+  async createEnrollCode(orgId: string, model = "", baseUrl?: string, ttlMinutes = 60, personId?: string, now = new Date()) {
     const ec = await this.prisma.enrollCode.create({
-      data: { orgId, code: randomId("hara-", 9), model, baseUrl: baseUrl ?? null, expiresAt: new Date(now.getTime() + ttlMinutes * 60_000) },
+      data: {
+        orgId,
+        code: randomId("hara-", 9),
+        model,
+        baseUrl: baseUrl ?? null,
+        personId: personId ?? null,
+        expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
+      },
     });
-    await this.audit.log(orgId, "enroll_code.create", "admin", "", { model, ttlMinutes });
+    await this.audit.log(orgId, "enroll_code.create", "admin", "", { model, ttlMinutes, personId });
     return { code: ec.code, expiresAt: ec.expiresAt };
   }
 

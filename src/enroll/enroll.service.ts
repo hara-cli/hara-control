@@ -21,7 +21,14 @@ export class EnrollService {
     }
 
     const dev = await this.prisma.device.create({
-      data: { orgId: ec.orgId, name: device.name, os: device.os, haraVersion: device.hara_version, enrollCodeId: ec.id },
+      data: {
+        orgId: ec.orgId,
+        name: device.name,
+        os: device.os,
+        haraVersion: device.hara_version,
+        enrollCodeId: ec.id,
+        personId: ec.personId ?? null, // per-person enroll: inherit this person's digital employees
+      },
     });
     const issued = await this.gateway.issueKey({ model: ec.model, alias: dev.id, metadata: { orgId: ec.orgId } });
     await this.prisma.deviceToken.create({

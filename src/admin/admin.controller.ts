@@ -16,7 +16,7 @@ export class AdminController {
 
   @Post("enroll-codes")
   createEnrollCode(@Body() dto: CreateEnrollCodeDto) {
-    return this.admin.createEnrollCode(dto.orgId, dto.model, dto.baseUrl, dto.ttlMinutes);
+    return this.admin.createEnrollCode(dto.orgId, dto.model, dto.baseUrl, dto.ttlMinutes, dto.personId);
   }
 
   @Get("fleet")

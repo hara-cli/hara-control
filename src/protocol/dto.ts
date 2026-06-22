@@ -31,4 +31,6 @@ export class CreateEnrollCodeDto {
   @IsString() @IsOptional() model?: string;
   @IsString() @IsOptional() baseUrl?: string;
   @IsInt() @Min(1) @IsOptional() ttlMinutes?: number;
+  // per-person enroll: bind the resulting device to this Person (inherits their digital employees)
+  @IsString() @IsOptional() personId?: string;
 }

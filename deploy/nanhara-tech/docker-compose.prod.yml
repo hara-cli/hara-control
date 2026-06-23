@@ -1,0 +1,14 @@
+# Production overlay for the gw.nanhara.tech TEST gateway on the shared `ai` box.
+# Key difference vs the dev compose: data-plane ports are bound to 127.0.0.1 so ONLY the host
+# (nginx + the Nest control plane) can reach Postgres / LiteLLM — never the public internet.
+#
+#   docker compose -f docker-compose.yml -f deploy/nanhara-tech/docker-compose.prod.yml up -d
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5433:5432" # localhost-only (was 0.0.0.0:5433 in the dev compose)
+    restart: unless-stopped
+  litellm:
+    ports:
+      - "127.0.0.1:4000:4000" # localhost-only — LiteLLM admin must never be public
+    restart: unless-stopped

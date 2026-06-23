@@ -5,10 +5,12 @@
 #   docker compose -f docker-compose.yml -f deploy/nanhara-tech/docker-compose.prod.yml up -d
 services:
   postgres:
-    ports:
-      - "127.0.0.1:5433:5432" # localhost-only (was 0.0.0.0:5433 in the dev compose)
+    # `!override` REPLACES the base compose's port list. Compose MERGES lists by default, so without it
+    # you'd bind BOTH 0.0.0.0:5433 (base) and 127.0.0.1:5433 (here) → "address already in use".
+    ports: !override
+      - "127.0.0.1:5433:5432" # localhost-only on the shared box
     restart: unless-stopped
   litellm:
-    ports:
+    ports: !override
       - "127.0.0.1:4000:4000" # localhost-only — LiteLLM admin must never be public
     restart: unless-stopped

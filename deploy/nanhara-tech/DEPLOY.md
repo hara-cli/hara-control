@@ -7,6 +7,20 @@ keeps it off the production `nanhara.com` (ICP'd) site.
 **Target:** `ai` = `112.124.201.107` (Aliyun, root). Has docker+compose, nginx, certbot. DNS for
 `nanhara.tech` is on alidns (same as nanhara.com) and `api.nanhara.tech` already points at `ai`.
 
+> **⚠️ UPDATE 2026-06-23 — what actually worked (use `deploy-ai-rds.sh`, not the docker path below):**
+> - **CN can't reach Docker Hub** from `ai`, and the box's configured mirrors are dead → the dockerized
+>   Postgres path failed. We pivoted to **Aliyun RDS PostgreSQL** (`pgm-…pg.rds.aliyuncs.com`, db `hara_db`,
+>   VPC-intranet, pgvector available) + a **dockerless** deploy (`deploy-ai-rds.sh`: `npm ci`→build→
+>   `prisma migrate deploy`→pm2). All 8 migrations applied; Nest runs under pm2 on `127.0.0.1:4100`. Use
+>   the npmmirror registry + `PRISMA_ENGINES_MIRROR` on the box.
+> - **`ai` is the LIVE prod backend box** (pm2 runs `yimatrix-api`, `nanyiapp-api`, …). Keep everything
+>   localhost-bound. It's an **oneinstack/LNMP** nginx with a `default_server reuseport` + `vhost/*.conf`;
+>   a `conf.d` `server_name` block did **not** win Host-routing for `api.nanhara.tech` (it hit the yimatrix
+>   default). **Public exposure is unsolved** — for now validate over an **SSH tunnel**
+>   (`ssh -fNL 14100:127.0.0.1:4100 ai` → enroll to `http://localhost:14100`). Clean public options:
+>   a dedicated `listen <port>` server + open that port in the Aliyun security group, or sort the vhost
+>   precedence. R1 (enroll→token→fleet `online:true`→`/v1/roles`) **validated via the tunnel** on 2026-06-23.
+
 ## Roll out in 3 rounds (escalating, zero key first)
 - **R1 — control plane only** (`GATEWAY_ADAPTER=mock`): enroll → device token → `/v1/roles` (validates the
   0.70 org-role push-down) → heartbeat → fleet. No LLM, no key. **Do this first.**

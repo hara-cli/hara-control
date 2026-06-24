@@ -11,6 +11,7 @@
     "start:dev": "nest start --watch",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "admin": "tsx cli/admin.ts",
     "test": "node --test --import tsx test/*.test.ts"
   },
   "dependencies": {

@@ -11,11 +11,31 @@ datasource db {
   extensions = [vector] // pgvector — org-asset semantic search (P0)
 }
 
+/// Org-unit type for the self-referential hierarchy. A single company = one COMPANY node with
+/// DEPARTMENT children (no GROUP parent). A group/conglomerate adds a GROUP root over COMPANY nodes.
+/// TEAM is the leaf tier (the standalone `Team` model is NOT folded in yet — see docs/org-hierarchy.md).
+enum OrgUnitType {
+  GROUP // 集团
+  COMPANY // 公司
+  DEPARTMENT // 部门
+  TEAM // 组
+}
+
+/// An org unit — a node in a typed, self-referential tree (集团 → 公司 → 部门 → 组). Pre-existing rows
+/// default to COMPANY roots (parentId null), so single-company mode keeps working unchanged. Governance
+/// (`policy`) inherits DOWN the tree: a department inherits its company's setting unless it overrides
+/// (see OrgTreeService.resolveInherited). Self-relation name "OrgTree": parent ↔ children.
 model Organization {
-  id        String   @id @default(uuid())
+  id        String      @id @default(uuid())
   name      String
-  policy    Json     @default("{}") // org-level governance: modelDeny / requireApprovalForWrites / toolDeny / budget
-  createdAt DateTime @default(now())
+  type      OrgUnitType @default(COMPANY) // 集团/公司/部门/组 — advisory nesting, not hard-enforced
+  parentId  String? // null = a root unit (a standalone COMPANY, or a GROUP top); set = a child unit
+  policy    Json        @default("{}") // governance: modelDeny / requireApprovalForWrites / toolDeny / budget
+  createdAt DateTime    @default(now())
+
+  // self-referential tree (downward inheritance walks parent → … → root)
+  parent   Organization?  @relation("OrgTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Organization[] @relation("OrgTree")
 
   enrollCodes      EnrollCode[]
   devices          Device[]
@@ -27,6 +47,8 @@ model Organization {
   assets           Asset[]
   workSessions     WorkSession[]
   workEvents       WorkEvent[]
+
+  @@index([parentId])
 }
 
 /// One-time enrollment code an admin hands to a machine. Exchanged at POST /v1/enroll.

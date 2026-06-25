@@ -44,7 +44,8 @@ export function enrollHint(gatewayUrl: string, code: string): string {
 }
 
 const USAGE = `hara-control admin
-  org create <name>                                       create an org (prints its id)
+  org create <name> [--type GROUP|COMPANY|DEPARTMENT|TEAM] [--parent id]   create an org unit (prints its id)
+  org tree <orgId>                                        show a unit's ancestors + subtree ids
   fleet <orgId>                                           list devices (online · model · spend)
   enroll <orgId> [--model m] [--person id] [--ttl min]    mint an enroll code + print the hara command
   revoke <deviceId>                                       revoke a device's token
@@ -65,9 +66,20 @@ export async function main(argv: string[]): Promise<void> {
   switch (cmd) {
     case "org":
       if (rest[0] === "create" && rest[1]) {
-        const org = await req("POST", "/admin/orgs", { name: rest[1] });
-        console.log(`✓ org ${org.id}  (${org.name})`);
-      } else console.log("usage: org create <name>");
+        const body: any = { name: rest[1] };
+        const type = flag(rest, "type");
+        if (type) body.type = type;
+        const parent = flag(rest, "parent");
+        if (parent) body.parentId = parent;
+        const org = await req("POST", "/admin/orgs", body);
+        console.log(`✓ org ${org.id}  (${org.name}, ${org.type}${org.parentId ? ` ↳ ${org.parentId}` : " · root"})`);
+      } else if (rest[0] === "tree" && rest[1]) {
+        const id = encodeURIComponent(rest[1]);
+        const ancestors = await req("GET", `/admin/orgs/${id}/ancestors`);
+        const subtree = await req("GET", `/admin/orgs/${id}/subtree`);
+        console.log(`ancestors (self→root): ${ancestors.map((o: any) => `${o.name}[${o.type}]`).join(" → ")}`);
+        console.log(`subtree ids (${subtree.length}): ${subtree.join(", ")}`);
+      } else console.log("usage: org create <name> [--type T] [--parent id]  |  org tree <orgId>");
       break;
     case "fleet": {
       if (!rest[0]) return void console.error("usage: fleet <orgId>");

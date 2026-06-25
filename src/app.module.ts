@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { PrismaModule } from "./prisma/prisma.module";
+import { OrgModule } from "./org/org.module";
 import { GatewayModule } from "./gateway/gateway.module";
 import { AuditModule } from "./audit/audit.module";
 import { EnrollModule } from "./enroll/enroll.module";
@@ -12,6 +13,6 @@ import { WorkModule } from "./work/work.module";
 import { SecretsModule } from "./security/secrets.module";
 
 @Module({
-  imports: [PrismaModule, GatewayModule, AuditModule, LicenseModule, EmbeddingModule, EnrollModule, AdminModule, RolesModule, AssetsModule, WorkModule, SecretsModule],
+  imports: [PrismaModule, OrgModule, GatewayModule, AuditModule, LicenseModule, EmbeddingModule, EnrollModule, AdminModule, RolesModule, AssetsModule, WorkModule, SecretsModule],
 })
 export class AppModule {}

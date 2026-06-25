@@ -1,6 +1,8 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { OrgUnitType } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { OrgTreeService } from "../org/org-tree.service";
 import { GATEWAY_ADAPTER, GatewayAdapter } from "../gateway/gateway-adapter";
 import { randomId } from "../common/crypto";
 
@@ -11,11 +13,35 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly orgTree: OrgTreeService,
     @Inject(GATEWAY_ADAPTER) private readonly gateway: GatewayAdapter,
   ) {}
 
-  createOrg(name: string) {
-    return this.prisma.organization.create({ data: { name } });
+  /**
+   * Create an org unit. Backward-compatible: with no `type`/`parentId` it makes a standalone COMPANY
+   * root (the original `createOrg(name)` behaviour). Pass `type` + `parentId` to nest a child unit
+   * (e.g. a DEPARTMENT under a COMPANY). Nesting is advisory — we validate the parent EXISTS but don't
+   * hard-enforce the type ordering, keeping the model flexible to extend to a group later.
+   */
+  async createOrg(name: string, type: OrgUnitType = OrgUnitType.COMPANY, parentId?: string) {
+    if (parentId) {
+      const parent = await this.prisma.organization.findUnique({ where: { id: parentId } });
+      if (!parent) throw new BadRequestException(`parent org "${parentId}" not found`);
+    }
+    const org = await this.prisma.organization.create({ data: { name, type, parentId: parentId ?? null } });
+    // Audit under the unit's OWN id so a per-org chain exists from creation; record where it sits.
+    await this.audit.log(org.id, "org.create", "admin", "", { name, type, parentId: parentId ?? null });
+    return org;
+  }
+
+  /** The ancestor chain (leaf-first: [self … root]) — for an admin "where does this unit sit" view. */
+  orgAncestors(orgId: string) {
+    return this.orgTree.ancestors(orgId);
+  }
+
+  /** All unit ids in the subtree (incl. self) — e.g. "this company + all its departments". */
+  orgSubtree(orgId: string) {
+    return this.orgTree.descendants(orgId);
   }
 
   async createEnrollCode(orgId: string, model = "", baseUrl?: string, ttlMinutes = 60, personId?: string, now = new Date()) {

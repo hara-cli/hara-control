@@ -2,7 +2,8 @@
 // (src/org-fleet/enroll.ts). The shared @nanhara/hara-protocol package (extracted on the open CLI
 // side later) will own these types; the closed server will depend on it.
 import { Type } from "class-transformer";
-import { IsInt, IsNotEmpty, IsOptional, IsString, Min, ValidateNested } from "class-validator";
+import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Min, ValidateNested } from "class-validator";
+import { OrgUnitType } from "@prisma/client";
 
 export class DeviceInfoDto {
   @IsString() @IsNotEmpty() name!: string;
@@ -24,6 +25,10 @@ export class HeartbeatDto {
 
 export class CreateOrgDto {
   @IsString() @IsNotEmpty() name!: string;
+  // Hierarchy (additive): defaults to a standalone COMPANY root if both are omitted, so the old
+  // `POST /admin/orgs {name}` contract is unchanged. Set type=DEPARTMENT + parentId=<companyId> to nest.
+  @IsEnum(OrgUnitType) @IsOptional() type?: OrgUnitType;
+  @IsString() @IsOptional() parentId?: string;
 }
 
 export class CreateEnrollCodeDto {

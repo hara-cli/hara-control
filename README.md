@@ -106,4 +106,7 @@ curl -X POST localhost:4100/admin/orgs -H 'x-admin-key: admin-dev-change-me' \
 ```
 
 Roadmap: ~~Phase 0 spike~~ → **Phase 1 MVP** (here) → Phase 2 hardening (OIDC/SSO, audit, RBAC) →
-Phase 3 multi-tenant SaaS.
+~~Phase 3 multi-tenant SaaS~~ → **single-company mode with a flexible org-unit hierarchy**
+(集团 → 公司 → 部门 → 组; see [`docs/org-hierarchy.md`](docs/org-hierarchy.md)). We are **not** building a
+multi-tenant SaaS; instead `Organization` is a self-referential tree that scales from one company (a
+COMPANY root + DEPARTMENT children) up to a group/conglomerate later, with **no** schema change.

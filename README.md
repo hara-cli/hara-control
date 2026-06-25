@@ -1,9 +1,13 @@
 # hara-control
 
-> **Proprietary — © 无锡南荒科技 (Nanhara). All rights reserved.** Not open source.
-> This is the closed-source **control plane** for the [hara](https://github.com/hara-cli/hara) fleet.
-> The hara **CLI** is Apache-2.0 OSS and free for individual (C-end) use; `hara-control` is the
-> commercial B-end product that organizations license to run a managed fleet.
+> **Open source — Apache-2.0.** The **control plane** for the [hara](https://github.com/hara-cli/hara) fleet:
+> device enrollment, scoped token issue/revoke, fleet view, and governance. Self-host it freely — your upstream
+> provider keys never leave your infrastructure.
+>
+> We make money from **operating it**, not from withholding it: a **managed/hosted** control plane (zero-ops,
+> self-serve), closed **enterprise plugins** (SSO/SCIM, org-scale RBAC, tamper-evident audit/compliance), and a
+> curated **governance content** library (role/policy packs). The engine is open; the operation and the curated
+> content are the paid layer. Nothing here is obfuscated — every shipped line is readable Apache-2.0 source.
 
 ## What this is
 
@@ -18,8 +22,24 @@
 
 It does **not** reimplement the LLM gateway. The **data plane** (protocol translation, routing to N
 upstreams incl. cloud + customer self-hosted vLLM/Ollama, streaming, retries, upstream-key vault) is a
-**bought/embedded engine** — **LiteLLM**, run as a black-box sidecar behind a thin adapter. We build and
-100%-own the control plane (the product / moat / paid layer); we do not fork the engine.
+**bought/embedded engine** — **LiteLLM**, run as a black-box sidecar behind a thin adapter. We build the control
+plane in the open (Apache-2.0); the moat is the **hosted operation + curated governance content**, not withheld
+code. We do not fork the engine.
+
+## Security (v1 — hardening TODO before relying on it in production)
+
+This control plane issues scoped device tokens and proxies upstream LLM calls. It's designed so the secret is the
+**key/config, not the code** (real provider keys live only in the embedded LiteLLM/vault; devices hold a
+short-lived, revocable token whose hash is what we store). Because it's now self-hostable by anyone, the
+following hardening is on the v1 roadmap — review/contribute before trusting it with real keys at scale:
+
+- **SSRF allow-list** on the upstream proxy (block link-local `169.254.0.0/16`, RFC1918, redirects to private space).
+- **Multi-tenant isolation** enforced at the DB layer (Postgres row-level security), not just app code.
+- **Tamper-evident audit** (hash-chained log + periodic signed checkpoints).
+- **At-rest secrets** via envelope encryption / KMS (never plaintext in Postgres or `.env`).
+- **Token discipline**: short TTL + silent refresh, scopes, server-side revocation list, per-tenant rate/spend caps.
+
+Self-hosted and hosted-by-Nanhara are different threat models; defaults target secure-by-default for self-hosters.
 
 ## Architecture (decided)
 

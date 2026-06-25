@@ -95,6 +95,66 @@ DB can't silently rebuild the whole chain. The seam: a `checkpoint(orgId)` that 
 **Tests:** `test/token-discipline.test.ts`; `test/enroll.test.ts` (existing) still green — issue stores
 the hash + expiry, heartbeat enforces revocation/expiry.
 
+### 4. At-rest secret envelope encryption / KMS adapter ✅
+
+**Status: implemented (envelope + `LocalKeyfileKms` + `SecretsService`). Cloud-KMS adapters and the
+`.env`→`Secret` importer remain deferred (clearly-labeled seams that throw).**
+
+**What needs protecting at rest:** the **real upstream provider key** and the **LiteLLM master key**.
+Today these live in `.env` / process env and inside LiteLLM's own store. Device tokens are already
+hash-only at rest (good); the gap was the *upstream* credentials and any future per-org BYO-key — now
+closed by a `SecretsService` that envelope-encrypts every value through a pluggable `KmsAdapter`.
+
+**Where:**
+- `src/security/kms/kms-adapter.ts` — the seam (`KmsAdapter` interface + `Envelope`/`KmsContext` types +
+  `KmsConfigError` + `KMS_ADAPTER` DI token), mirroring `GatewayAdapter`.
+- `src/security/kms/local-keyfile.ts` — `LocalKeyfileKms`, AES-256-GCM envelope, `node:crypto` only.
+- `src/security/kms/index.ts` — `createKms()` factory selecting by `HARA_KMS_PROVIDER`.
+- `src/security/secrets.service.ts` + `secrets.module.ts` — `SecretsService.put/get/getString/remove`,
+  wired `@Global` into `app.module.ts` (KMS adapter built **lazily** on first use so dev/test/CI boot
+  without a master key, like `GATEWAY_ADAPTER` defaulting to the mock).
+- Prisma `Secret` model + migration `prisma/migrations/20260626000000_secrets_store` (additive,
+  `CREATE TABLE IF NOT EXISTS`, Postgres `BYTEA`).
+
+**Envelope scheme (as implemented — for crypto review):**
+- Per `encrypt()`: generate a fresh random **32-byte DEK**; AES-256-GCM-encrypt the plaintext under the
+  DEK with a fresh random **12-byte IV**, binding `ctx.orgId` as the GCM **AAD**. The stored
+  `ciphertext` packs `iv(12) ‖ authTag(16) ‖ enc` (so the spec's `{iv, tag}` live *with* the
+  ciphertext rather than as separate columns).
+- The DEK is then **wrapped** with the master **CEK** (also AES-256-GCM, its own fresh 12-byte IV);
+  `wrappedDek` packs `iv(12) ‖ authTag(16) ‖ encDek`.
+- Persist only `{ciphertext, wrappedDek, keyRef}` — **never** the plaintext, **never** an unwrapped DEK.
+  `keyRef = "local:<sha256(CEK)[:16]>"` identifies *which* CEK wrapped the DEK (a non-reversible
+  fingerprint, never the key itself), so rotation = re-wrap DEKs against a new CEK without re-encrypting
+  any ciphertext. The master key is never logged.
+- **Tenant isolation:** `orgId` AAD means a ciphertext copied into another tenant's row fails to decrypt
+  (GCM tag check). A `null` orgId = a control-plane-global secret (its own namespace).
+- **Master key (CEK) source:** `HARA_KMS_MASTER_KEY` (32 bytes as base64 / base64url / 64-char hex) or
+  `HARA_KMS_KEYFILE` (a path whose contents decode to 32 bytes). Missing/short → clear `KmsConfigError`
+  (never silently weak crypto).
+
+**Provider selection (`HARA_KMS_PROVIDER`):** `local` (default) → `LocalKeyfileKms`; `aws` / `gcp` /
+`vault` → clearly-labeled "not implemented, configure X" stubs that **throw** (the seam exists for the
+swap, but never silently falls back to weaker crypto). Unknown provider → fail fast.
+
+**Tests:** `test/kms.test.ts` (offline, no live DB) — envelope round-trip (string + binary), fresh-IV
+(same plaintext → different ciphertext), AAD/tenant isolation, ciphertext + wrapped-DEK tamper
+detection, wrong-CEK + master-key-missing/bad-length errors, factory selection + cloud-stub throws, and
+`SecretsService` put→get over a fake Prisma (never stores plaintext; rotates on re-put; cross-tenant
+DB-theft fails to decrypt).
+
+**Still deferred (designed, not built):**
+- **Cloud-KMS adapters** (`AwsKmsAdapter`, `GcpKmsAdapter`, `VaultTransitAdapter`) — seams throw with a
+  configure hint; implement against the cloud root key when needed (HSM-backed root, no local CEK).
+- **The one-shot `.env`→`Secret` importer** — read existing `.env` upstream keys, `put()` them, then
+  remove the `.env` plaintext. The control-plane/LiteLLM wiring would then read the upstream key from
+  `SecretsService` at startup (decrypted into memory only) instead of `process.env`.
+- **DEK rotation tooling** — re-wrap stored `wrappedDek`s against a new CEK (the `keyRef` field is the
+  hook; cross-CEK reads already fail clearly).
+
+**Non-goals for v1:** HSM-backed signing, per-request key derivation. `LocalKeyfileKms` keeps
+self-hosters secure-by-default without a cloud dependency; the cloud adapter is the next increment.
+
 ---
 
 ## Documented as TODO (designed, not fully implemented)
@@ -131,39 +191,8 @@ maps `@id` to `text`, so policies compare text-to-text; an unset session var →
 **Tables in scope:** all listed above; explicitly **excluded:** `DeviceToken`, `PersonTeam`,
 `_prisma_migrations`, and the LiteLLM-owned spend tables (separate ownership in the shared DB).
 
-### B. At-rest secret envelope encryption / KMS adapter
-
-**Status: not implemented — design + seam documented.**
-
-**What needs protecting at rest:** the **real upstream provider key** and the **LiteLLM master key**.
-Today these live in `.env` / process env and inside LiteLLM's own store. Device tokens are already
-hash-only at rest (good); the gap is the *upstream* credentials and any future per-org BYO-key.
-
-**Design (envelope encryption):**
-- A **KMS adapter interface** mirroring the existing `GatewayAdapter` seam pattern:
-  ```ts
-  // src/security/kms/kms-adapter.ts  (the seam)
-  interface KmsAdapter {
-    encrypt(plaintext: Buffer, ctx: { orgId?: string }): Promise<{ ciphertext: Buffer; wrappedDek: Buffer; keyRef: string }>;
-    decrypt(ciphertext: Buffer, wrappedDek: Buffer, keyRef: string, ctx: { orgId?: string }): Promise<Buffer>;
-  }
-  ```
-- **Envelope scheme:** generate a per-secret **DEK** (AES-256-GCM) locally, encrypt the secret with it,
-  then **wrap the DEK** with the KMS **CEK**. Store `{ciphertext, wrappedDek, keyRef, iv, tag}` — never
-  the plaintext, never an unwrapped DEK at rest. Use `orgId` as the encryption **context/AAD** so a
-  ciphertext can't be replayed across tenants.
-- **Adapters:** `LocalKeyfileKms` (AES-256-GCM with a master key from a file / `HARA_KMS_MASTER_KEY`,
-  for self-hosters with no cloud KMS — *envelope, but root key still local*), `AwsKmsAdapter`,
-  `GcpKmsAdapter`, `VaultTransitAdapter`. Selected via `HARA_KMS_PROVIDER`.
-- **Where the seam goes:** a new `Secret` store (or columns on a future `OrgUpstreamKey` model) read
-  through a `SecretsService` that calls the `KmsAdapter` on read/write. The upstream key would move
-  from `.env` into this store; LiteLLM is configured from decrypted-at-startup values held in memory
-  only. Rotation = re-wrap DEKs against a new CEK without touching ciphertexts of the secrets.
-- **Migration:** additive `Secret` table; a one-shot importer reads existing `.env` upstream keys,
-  encrypts, and writes them — then the `.env` plaintext can be removed.
-
-**Non-goals for v1:** HSM-backed signing, per-request key derivation. Start with envelope + a cloud-KMS
-adapter; the `LocalKeyfileKms` keeps self-hosters secure-by-default without a cloud dependency.
+> §B (at-rest secret envelope encryption / KMS) graduated from this TODO section to **Implemented #4**
+> above.
 
 ---
 

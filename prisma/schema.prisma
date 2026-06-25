@@ -113,6 +113,28 @@ model AuditLog {
   @@index([orgId, seq])
 }
 
+/// At-rest secret store (HARDENING.md §B). Envelope-encrypted via a KmsAdapter: the plaintext is
+/// encrypted under a per-secret DEK (AES-256-GCM, iv+tag packed into `ciphertext`), and that DEK is
+/// wrapped under the KMS master CEK (iv+tag packed into `wrappedDek`). We store ONLY the envelope —
+/// never plaintext, never an unwrapped DEK. `keyRef` identifies which CEK wrapped the DEK (rotation).
+/// `orgId` is bound as the GCM AAD on the secret, so a ciphertext can't be replayed across tenants.
+/// Intentionally NOT org-FK'd: a null orgId is a control-plane-global secret (e.g. the upstream key),
+/// and the tenant binding is enforced cryptographically (AAD), not just relationally.
+model Secret {
+  id         String   @id @default(uuid())
+  orgId      String?  // null = control-plane-global secret; set = tenant-scoped (also bound as AAD)
+  name       String   // logical name, e.g. "upstream.api_key" / "litellm.master_key"
+  ciphertext Bytes    // plaintext encrypted under the per-secret DEK (iv ‖ tag ‖ enc)
+  wrappedDek Bytes    // per-secret DEK encrypted ("wrapped") under the KMS CEK (iv ‖ tag ‖ enc)
+  keyRef     String   // which CEK/master key wrapped the DEK — drives rotation + multi-provider
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // unique per (org, name); a null orgId is treated as a distinct global namespace by Postgres.
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
 // ── B3: agent / digital-employee / role-assignment governance ──────────────────────────────
 
 /// Org-defined reusable persona — the control-plane authority for a CLI Role

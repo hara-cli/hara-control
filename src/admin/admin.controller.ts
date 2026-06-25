@@ -28,4 +28,10 @@ export class AdminController {
   revoke(@Param("id") id: string) {
     return this.admin.revokeDevice(id);
   }
+
+  /** Verify the org's tamper-evident audit hash chain (compliance integrity check). */
+  @Get("audit/verify")
+  verifyAudit(@Query("orgId") orgId: string) {
+    return this.admin.verifyAudit(orgId);
+  }
 }

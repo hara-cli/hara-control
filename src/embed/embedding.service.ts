@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { safeFetch } from "../security/ssrf";
 
 // Configurable embedder (per the owner's decision: local OR remote, not pinned). Points at any
 // OpenAI-compatible /embeddings endpoint via env:
@@ -24,7 +25,9 @@ export class EmbeddingService {
 
   async embed(texts: string[]): Promise<number[][] | null> {
     if (!this.enabled() || texts.length === 0) return null;
-    const res = await fetch(`${this.base}/embeddings`, {
+    // SSRF guard: HARA_EMBED_BASE_URL is operator-config but may point anywhere — validate it (and
+    // any redirect) before the request leaves the box. See src/security/ssrf.ts.
+    const res = await safeFetch(`${this.base}/embeddings`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.key ? { authorization: `Bearer ${this.key}` } : {}) },
       body: JSON.stringify({ model: this.model, input: texts }),

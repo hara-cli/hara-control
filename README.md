@@ -26,20 +26,27 @@ upstreams incl. cloud + customer self-hosted vLLM/Ollama, streaming, retries, up
 plane in the open (Apache-2.0); the moat is the **hosted operation + curated governance content**, not withheld
 code. We do not fork the engine.
 
-## Security (v1 — hardening TODO before relying on it in production)
+## Security (v1 hardening — see [`HARDENING.md`](./HARDENING.md))
 
 This control plane issues scoped device tokens and proxies upstream LLM calls. It's designed so the secret is the
 **key/config, not the code** (real provider keys live only in the embedded LiteLLM/vault; devices hold a
 short-lived, revocable token whose hash is what we store). Because it's now self-hostable by anyone, the
-following hardening is on the v1 roadmap — review/contribute before trusting it with real keys at scale:
+v1 hardening status is:
 
-- **SSRF allow-list** on the upstream proxy (block link-local `169.254.0.0/16`, RFC1918, redirects to private space).
-- **Multi-tenant isolation** enforced at the DB layer (Postgres row-level security), not just app code.
-- **Tamper-evident audit** (hash-chained log + periodic signed checkpoints).
-- **At-rest secrets** via envelope encryption / KMS (never plaintext in Postgres or `.env`).
-- **Token discipline**: short TTL + silent refresh, scopes, server-side revocation list, per-tenant rate/spend caps.
+- ✅ **SSRF allow-list** on outbound fetches — link-local `169.254.0.0/16` (incl. `169.254.169.254`
+  metadata) + loopback always blocked, RFC1918 blockable, every redirect re-validated.
+  `src/security/ssrf.ts`, wired into the LiteLLM + embeddings calls.
+- ✅ **Tamper-evident audit** — per-org hash-chained `AuditLog` + `verify()` (`GET /admin/audit/verify`).
+  Signed checkpoints are the deferred enterprise extension.
+- ✅ **Token discipline** — short TTL (`expiresAt`, default 7d) + server-side revocation check on every
+  validation + a per-device/per-tenant spend-cap enforcement hook. `src/security/token-discipline.ts`.
+- 🟡 **Multi-tenant isolation** — Postgres RLS policies exist on all org-scoped tables; finishing it (a
+  non-owner app role + `FORCE` + `WITH CHECK`) is documented in `HARDENING.md §A`.
+- 📝 **At-rest secrets** via envelope encryption / KMS — design + seam documented in `HARDENING.md §B`
+  (not yet implemented; upstream keys currently live in `.env`/LiteLLM).
 
 Self-hosted and hosted-by-Nanhara are different threat models; defaults target secure-by-default for self-hosters.
+Config knobs for the above are in [`.env.example`](./.env.example).
 
 ## Architecture (decided)
 

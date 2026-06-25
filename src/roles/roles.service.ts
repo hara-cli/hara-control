@@ -4,6 +4,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { EntitlementService } from "../license/license.service";
 import { sha256 } from "../common/crypto";
+import { assertTokenUsable } from "../security/token-discipline";
 
 /** Governance policy carried at org / team / assignment levels and merged (org < team < assignment). */
 export type Policy = {
@@ -221,8 +222,8 @@ export class RolesService {
   async bundleForBearer(bearer: string | undefined) {
     if (!bearer) throw new UnauthorizedException("missing token");
     const dt = await this.prisma.deviceToken.findUnique({ where: { tokenHash: sha256(bearer) } });
-    if (!dt || dt.revokedAt) throw new UnauthorizedException("revoked or unknown token");
-    return this.resolveBundleForDevice(dt.deviceId);
+    await assertTokenUsable(dt); // revocation + short-TTL expiry + spend-cap hook
+    return this.resolveBundleForDevice(dt!.deviceId);
   }
 }
 

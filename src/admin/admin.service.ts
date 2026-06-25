@@ -70,4 +70,9 @@ export class AdminService {
     if (dev) await this.audit.log(dev.orgId, "revoke", "admin", deviceId, { tokens: tokens.length });
     return { revoked: tokens.length };
   }
+
+  /** Tamper-evidence check: recompute the org's audit hash chain and report the first break (if any). */
+  verifyAudit(orgId: string) {
+    return this.audit.verify(orgId);
+  }
 }

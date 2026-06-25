@@ -4,6 +4,7 @@ import { AuditService } from "../audit/audit.service";
 import { GATEWAY_ADAPTER, GatewayAdapter } from "../gateway/gateway-adapter";
 import { EntitlementService } from "../license/license.service";
 import { sha256 } from "../common/crypto";
+import { assertTokenUsable, deviceTokenExpiry } from "../security/token-discipline";
 import { DeviceInfoDto } from "../protocol/dto";
 
 @Injectable()
@@ -35,7 +36,8 @@ export class EnrollService {
     });
     const issued = await this.gateway.issueKey({ model: ec.model, alias: dev.id, metadata: { orgId: ec.orgId } });
     await this.prisma.deviceToken.create({
-      data: { deviceId: dev.id, tokenHash: sha256(issued.key), gatewayKeyId: issued.keyId, model: ec.model },
+      // short-TTL discipline: every issued token expires (HARA_DEVICE_TOKEN_TTL_MINUTES, default 7d)
+      data: { deviceId: dev.id, tokenHash: sha256(issued.key), gatewayKeyId: issued.keyId, model: ec.model, expiresAt: deviceTokenExpiry(now) },
     });
     await this.prisma.enrollCode.update({ where: { id: ec.id }, data: { usedAt: now } });
     await this.audit.log(ec.orgId, "enroll", "device", dev.id, { name: device.name, os: device.os });
@@ -47,9 +49,10 @@ export class EnrollService {
   async heartbeat(bearer: string | undefined, body: { hara_version?: string; os?: string }, now = new Date()) {
     if (!bearer) throw new UnauthorizedException("missing token");
     const dt = await this.prisma.deviceToken.findUnique({ where: { tokenHash: sha256(bearer) } });
-    if (!dt || dt.revokedAt) throw new UnauthorizedException("revoked or unknown token");
+    // central token discipline: revocation + short-TTL expiry + spend-cap hook (see token-discipline.ts)
+    await assertTokenUsable(dt, { now });
     await this.prisma.device.update({
-      where: { id: dt.deviceId },
+      where: { id: dt!.deviceId },
       data: {
         lastSeenAt: now,
         ...(body.hara_version ? { haraVersion: body.hara_version } : {}),

@@ -4,6 +4,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { EntitlementService } from "../license/license.service";
 import { sha256 } from "../common/crypto";
+import { assertTokenUsable } from "../security/token-discipline";
 import { redactSecrets } from "../assets/guard";
 
 export type WorkSessionInput = {
@@ -46,8 +47,8 @@ export class WorkService {
   private async deviceFromBearer(bearer?: string) {
     if (!bearer) throw new UnauthorizedException("missing token");
     const dt = await this.prisma.deviceToken.findUnique({ where: { tokenHash: sha256(bearer) }, include: { device: true } });
-    if (!dt || dt.revokedAt) throw new UnauthorizedException("revoked or unknown token");
-    return dt.device;
+    await assertTokenUsable(dt); // revocation + short-TTL expiry + spend-cap hook
+    return dt!.device;
   }
 
   /** Batched, idempotent ingest of completed work sessions. Append-only; metadata-only (T0). */

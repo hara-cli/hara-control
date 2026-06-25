@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { GatewayAdapter, IssuedKey, SpendRecord } from "./gateway-adapter";
+import { safeFetch } from "../security/ssrf";
 
 // Talks to the embedded LiteLLM proxy's admin API. The device token IS a LiteLLM virtual key scoped
 // to a model; the real provider key stays inside LiteLLM. We never store the raw key — revocation is
@@ -11,7 +12,9 @@ export class LiteLLMAdapter implements GatewayAdapter {
   private readonly masterKey = process.env.LITELLM_MASTER_KEY || "";
 
   private async call(path: string, body: unknown): Promise<Record<string, unknown>> {
-    const res = await fetch(`${this.base}${path}`, {
+    // safeFetch enforces the SSRF allow-list + private-address guard on the configured upstream
+    // (LITELLM_URL) and re-checks every redirect hop. See src/security/ssrf.ts.
+    const res = await safeFetch(`${this.base}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${this.masterKey}` },
       body: JSON.stringify(body),

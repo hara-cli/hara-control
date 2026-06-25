@@ -86,12 +86,16 @@ model DeviceToken {
   gatewayKeyId String              // id returned by the gateway adapter, used to revoke
   model        String    @default("")
   createdAt    DateTime  @default(now())
+  expiresAt    DateTime?           // short-TTL discipline: tokens expire and must be re-enrolled
   revokedAt    DateTime?
 
   @@index([deviceId])
 }
 
 /// Append-only audit trail. payload is JSONB (policy/context), queryable in Postgres.
+/// Tamper-evident: each row carries the prior row's hash (per-org chain) and its own rowHash =
+/// sha256(canonical(this) + prevHash). Editing/deleting any historical row breaks the chain, which
+/// AuditService.verify() detects. seq is the per-org monotonic position in the chain.
 model AuditLog {
   id        String   @id @default(uuid())
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -101,8 +105,12 @@ model AuditLog {
   actorId   String   @default("")
   payload   Json     @default("{}")
   at        DateTime @default(now())
+  seq       Int      @default(0)  // per-org monotonic position in the hash chain
+  prevHash  String   @default("") // rowHash of the previous audit row in this org's chain
+  rowHash   String   @default("") // sha256(canonical(this) + prevHash) — tamper-evidence anchor
 
   @@index([orgId, at])
+  @@index([orgId, seq])
 }
 
 // ── B3: agent / digital-employee / role-assignment governance ──────────────────────────────

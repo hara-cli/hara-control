@@ -5,6 +5,7 @@ import { AuditService } from "../audit/audit.service";
 import { EntitlementService } from "../license/license.service";
 import { EmbeddingService } from "../embed/embedding.service";
 import { sha256 } from "../common/crypto";
+import { assertTokenUsable } from "../security/token-discipline";
 import { redactSecrets, scanForInjection } from "./guard";
 
 // Recall precedence among server-side scopes (the device merges its local project scope on top).
@@ -37,8 +38,8 @@ export class AssetsService {
   private async deviceFromBearer(bearer?: string) {
     if (!bearer) throw new UnauthorizedException("missing token");
     const dt = await this.prisma.deviceToken.findUnique({ where: { tokenHash: sha256(bearer) }, include: { device: true } });
-    if (!dt || dt.revokedAt) throw new UnauthorizedException("revoked or unknown token");
-    return dt.device;
+    await assertTokenUsable(dt); // revocation + short-TTL expiry + spend-cap hook
+    return dt!.device;
   }
 
   private searchTextFor(title: string, summary: string | null, tags: string[], lang: string | null, body: string): string {

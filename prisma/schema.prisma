@@ -11,6 +11,32 @@ datasource db {
   extensions = [vector] // pgvector — org-asset semantic search (P0)
 }
 
+/// Admin console role. SUPERADMIN ≥ ADMIN ≥ MEMBER (see src/common/admin-auth.guard.ts). The shared
+/// x-admin-key (back-compat) is treated as SUPERADMIN. MEMBER is the future "self-only" role tier.
+enum AdminRole {
+  SUPERADMIN
+  ADMIN
+  MEMBER
+}
+
+/// Built-in admin console account (Phase 1 of docs/AUTH_SPEC.md). Password is scrypt-hashed via
+/// src/common/crypto.ts. `disabledAt` is the stateless revoke: checked on every login + every
+/// guard pass. `totpSecret` is a deliberate forward-seam — unused in v1 so optional TOTP can be
+/// added later without a migration. `orgId` is nullable: SUPERADMINs are typically org-less; ADMIN
+/// MEMBER accounts are org-scoped in later phases. NOT FK'd to Organization yet — table is created
+/// via `prisma db push` at deploy time and orgs are managed independently of admin accounts.
+model AdminUser {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  role         AdminRole  @default(ADMIN)
+  orgId        String?
+  disabledAt   DateTime?
+  totpSecret   String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
 /// Org-unit type for the self-referential hierarchy. A single company = one COMPANY node with
 /// DEPARTMENT children (no GROUP parent). A group/conglomerate adds a GROUP root over COMPANY nodes.
 /// TEAM is the leaf tier (the standalone `Team` model is NOT folded in yet — see docs/org-hierarchy.md).

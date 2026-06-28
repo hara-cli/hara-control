@@ -11,11 +11,18 @@ model_list:
       api_base: os.environ/HARA_MOCK_BASE
       api_key: mock-not-a-real-key
 
-  # ── Real upstream (regular DashScope compatible-mode, NOT the sk-sp- coding plan) ──
-  - model_name: glm-5
+  # ── Real upstream: DeepSeek (regular pay-as-you-go key in UPSTREAM_API_KEY; NOT a coding-plan sk-sp key) ──
+  # OpenAI-compatible at https://api.deepseek.com/chat/completions (Bearer). Current models = V4
+  # (deepseek-chat/-reasoner deprecate 2026-07-24). Client-facing names are stable aliases.
+  - model_name: deepseek-chat
     litellm_params:
-      model: openai/qwen-plus
-      api_base: os.environ/UPSTREAM_BASE_URL
+      model: openai/deepseek-v4-flash
+      api_base: https://api.deepseek.com
+      api_key: os.environ/UPSTREAM_API_KEY
+  - model_name: deepseek-pro
+    litellm_params:
+      model: openai/deepseek-v4-pro
+      api_base: https://api.deepseek.com
       api_key: os.environ/UPSTREAM_API_KEY
 
 litellm_settings:

@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>hara-control · console</title>
+  <meta name="color-scheme" content="dark">
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" href="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2210%22%20fill%3D%22%23ff6b5c%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ── LOGIN ─────────────────────────────────────────────────────── -->
+<div id="login-screen" class="login hidden">
+  <form id="login-form" class="login__card" autocomplete="on" novalidate>
+    <div class="login__mark" aria-hidden="true">
+      <!-- coral brand mark — simplified hara dot -->
+      <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="16" r="10" fill="#ff6b5c"/>
+        <circle cx="16" cy="16" r="3.5" fill="#0b0e14"/>
+      </svg>
+    </div>
+    <h1 class="login__title" data-i18n="login.title">Sign in</h1>
+    <p class="login__sub" data-i18n="app.title">hara-control</p>
+
+    <div class="field">
+      <label class="field__label" for="li-email" data-i18n="login.email">Email</label>
+      <input class="input" id="li-email" type="email" autocomplete="username" required
+             data-i18n-placeholder="login.email.placeholder">
+    </div>
+    <div class="field">
+      <label class="field__label" for="li-password" data-i18n="login.password">Password</label>
+      <input class="input" id="li-password" type="password" autocomplete="current-password" required
+             data-i18n-placeholder="login.password.placeholder">
+    </div>
+
+    <div id="li-2fa-wrap" class="login__2fa">
+      <div class="field">
+        <label class="field__label" for="li-code" data-i18n="login.code">6-digit code</label>
+        <input class="input input--mono" id="li-code" type="text"
+               inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code"
+               data-i18n-placeholder="login.code.placeholder">
+        <div class="field__hint" data-i18n="login.code.hint">Open your authenticator app.</div>
+      </div>
+    </div>
+
+    <button type="submit" id="li-submit" class="btn btn--block mt-2" data-i18n="login.submit">Sign in</button>
+    <div id="li-err" class="login__err" role="alert"></div>
+    <div class="login__footer" data-i18n="login.footer">self-hosted control plane</div>
+  </form>
+</div>
+
+<!-- ── APP ─────────────────────────────────────────────────────── -->
+<div id="app-screen" class="shell hidden">
+
+  <!-- sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar__brand">
+      <span class="sidebar__brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="16" cy="16" r="10" fill="#ff6b5c"/>
+          <circle cx="16" cy="16" r="3.5" fill="#161a21"/>
+        </svg>
+      </span>
+      <span class="sidebar__brand-text">hara</span>
+      <span class="sidebar__brand-sub" data-i18n="app.subtitle">console</span>
+    </div>
+
+    <nav class="sidebar__nav" id="sidebar-nav">
+      <a class="sidebar__item" href="#/overview" data-route="overview">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        </span>
+        <span data-i18n="nav.overview">Overview</span>
+      </a>
+      <a class="sidebar__item" href="#/orgs" data-route="orgs">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><path d="M12 8v3M5 16v-2h14v2"/></svg>
+        </span>
+        <span data-i18n="nav.orgs">Orgs</span>
+      </a>
+      <a class="sidebar__item" href="#/fleet" data-route="fleet">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/></svg>
+        </span>
+        <span data-i18n="nav.fleet">Fleet</span>
+      </a>
+      <a class="sidebar__item" href="#/enroll" data-route="enroll">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3"/><path d="M9 3h6v8H9z"/></svg>
+        </span>
+        <span data-i18n="nav.enroll">Enroll codes</span>
+      </a>
+      <a class="sidebar__item hidden" id="nav-users" href="#/users" data-route="users">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0z"/><path d="M3 21a9 9 0 0 1 18 0"/></svg>
+        </span>
+        <span data-i18n="nav.users">Users</span>
+      </a>
+      <a class="sidebar__item" href="#/security" data-route="security">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/></svg>
+        </span>
+        <span data-i18n="nav.security">Security</span>
+      </a>
+    </nav>
+
+    <div class="sidebar__gateway">
+      <span data-i18n="nav.gateway_status">Gateway</span>
+      <span class="sidebar__gateway-host">gw.nanhara.tech</span>
+      <span class="sidebar__gateway-dot" id="gw-dot" title="healthy"></span>
+    </div>
+  </aside>
+
+  <!-- main column -->
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar__crumb">
+        <span data-i18n="app.title">hara-control</span>
+        <span class="topbar__crumb-sep">›</span>
+        <span id="crumb-current" data-i18n="crumb.overview">Overview</span>
+      </div>
+      <div class="topbar__spacer"></div>
+      <div class="topbar__lang" role="tablist" aria-label="Language">
+        <button class="topbar__lang-opt" data-lang="en" type="button">EN</button>
+        <button class="topbar__lang-opt" data-lang="zh-CN" type="button">简</button>
+        <button class="topbar__lang-opt" data-lang="zh-TW" type="button">繁</button>
+      </div>
+      <span class="topbar__email" id="who-email">—</span>
+      <span class="pill topbar__role" id="who-role">—</span>
+      <button type="button" class="topbar__logout" id="logout" data-i18n="top.logout">Sign out</button>
+    </header>
+
+    <!-- ── views: only one .view--active visible at a time ──────────── -->
+
+    <!-- OVERVIEW -->
+    <section class="view hidden" id="view-overview" data-view="overview">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.overview">Overview</h1>
+          <p class="view__subtitle" data-i18n="overview.placeholder.note">(no stats endpoint yet — showing what we can derive from the lists)</p>
+        </div>
+      </div>
+
+      <div class="grid grid--kpi mb-2">
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="overview.kpi.orgs">Orgs</div>
+          <div class="kpi__value" id="kpi-orgs">—</div>
+          <div class="kpi__hint" data-i18n="overview.placeholder">Live counter coming soon</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="overview.kpi.devices_online">Devices online</div>
+          <div class="kpi__value kpi__value--muted" id="kpi-devices-online">—</div>
+          <div class="kpi__hint" data-i18n="overview.placeholder">Live counter coming soon</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="overview.kpi.activity_today">Activity today</div>
+          <div class="kpi__value kpi__value--muted" id="kpi-activity-today">—</div>
+          <div class="kpi__hint" data-i18n="overview.placeholder">Live counter coming soon</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="overview.kpi.users">Users</div>
+          <div class="kpi__value" id="kpi-users">—</div>
+          <div class="kpi__hint" data-i18n="overview.placeholder">Live counter coming soon</div>
+        </div>
+      </div>
+
+      <div class="grid grid--2">
+        <section class="card">
+          <h2 class="card__title" data-i18n="overview.section.recent_enroll">Recent enrollments</h2>
+          <div id="overview-recent" class="mt-2">
+            <div class="empty empty--inline" data-i18n="overview.empty.recent_enroll">Nothing yet — mint a code under Enroll codes.</div>
+          </div>
+        </section>
+        <section class="card">
+          <h2 class="card__title" data-i18n="overview.section.heartbeat">Gateway heartbeat</h2>
+          <p class="card__hint mt-2" data-i18n="overview.heartbeat.placeholder">Live ping not wired yet — gateway health surfaces in the sidebar.</p>
+        </section>
+      </div>
+    </section>
+
+    <!-- ORGS -->
+    <section class="view hidden" id="view-orgs" data-view="orgs">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.orgs">Orgs</h1>
+          <p class="view__subtitle" data-i18n="orgs.hint">Create org units and inspect the tree.</p>
+        </div>
+      </div>
+
+      <div class="grid grid--2">
+        <section class="card">
+          <h2 class="card__title" data-i18n="orgs.new.section">Create org</h2>
+          <div class="field">
+            <label class="field__label" for="org-name" data-i18n="orgs.new.name">Name</label>
+            <input class="input" id="org-name" type="text" data-i18n-placeholder="orgs.new.name.placeholder">
+          </div>
+          <div class="field">
+            <label class="field__label" for="org-type" data-i18n="orgs.new.type">Type</label>
+            <select class="select" id="org-type">
+              <option value="GROUP" data-i18n="orgs.type.GROUP">Group</option>
+              <option value="COMPANY" data-i18n="orgs.type.COMPANY" selected>Company</option>
+              <option value="DEPARTMENT" data-i18n="orgs.type.DEPARTMENT">Department</option>
+              <option value="TEAM" data-i18n="orgs.type.TEAM">Team</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field__label" for="org-parent" data-i18n="orgs.new.parent">Parent org id</label>
+            <input class="input input--mono" id="org-parent" type="text" data-i18n-placeholder="orgs.new.parent.placeholder">
+          </div>
+          <button type="button" class="btn mt-1" id="org-create" data-i18n="orgs.new.create">Create</button>
+          <div id="org-create-out" class="small mt-2"></div>
+        </section>
+
+        <section class="card">
+          <h2 class="card__title" data-i18n="orgs.inspect.section">Inspect org</h2>
+          <div class="field">
+            <label class="field__label" for="org-id" data-i18n="orgs.inspect.id">Org ID</label>
+            <div class="row">
+              <input class="input input--mono" id="org-id" type="text" data-i18n-placeholder="orgs.inspect.id.placeholder">
+              <button type="button" class="btn-ghost row__fixed" id="org-inspect" data-i18n="orgs.inspect.go">Inspect</button>
+            </div>
+          </div>
+          <div id="org-inspect-out" class="mt-2"></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- FLEET -->
+    <section class="view hidden" id="view-fleet" data-view="fleet">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.fleet">Fleet</h1>
+          <p class="view__subtitle" data-i18n="fleet.hint">Live device view for an org.</p>
+        </div>
+      </div>
+
+      <section class="card mb-2">
+        <div class="field" style="margin: 0;">
+          <label class="field__label" for="fleet-orgid" data-i18n="fleet.orgid">Org ID</label>
+          <div class="row">
+            <input class="input input--mono" id="fleet-orgid" type="text" data-i18n-placeholder="fleet.orgid.placeholder">
+            <button type="button" class="btn-ghost row__fixed" id="fleet-load" data-i18n="fleet.load">Load</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="fleet-filter-host" class="hidden">
+        <div class="filter-bar">
+          <input class="input" id="fleet-filter-search" type="text" data-i18n-placeholder="fleet.filter.search" style="max-width: 260px;">
+          <input class="input" id="fleet-filter-model" type="text" data-i18n-placeholder="fleet.filter.model" style="max-width: 200px;">
+          <label class="filter-bar__check">
+            <input id="fleet-filter-online" type="checkbox">
+            <span data-i18n="fleet.filter.online_only">Online only</span>
+          </label>
+        </div>
+      </div>
+      <div id="fleet-table"></div>
+    </section>
+
+    <!-- ENROLL -->
+    <section class="view hidden" id="view-enroll" data-view="enroll">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.enroll">Enroll codes</h1>
+          <p class="view__subtitle" data-i18n="enroll.hint">Mint a one-time code that a hara CLI redeems for a device token.</p>
+        </div>
+      </div>
+
+      <section class="card">
+        <div class="grid grid--2">
+          <div>
+            <div class="field">
+              <label class="field__label" for="ec-orgid" data-i18n="enroll.orgid">Org ID</label>
+              <input class="input input--mono" id="ec-orgid" type="text" data-i18n-placeholder="enroll.orgid.placeholder">
+            </div>
+            <div class="field">
+              <label class="field__label" for="ec-model" data-i18n="enroll.model">Model alias</label>
+              <input class="input" id="ec-model" type="text" data-i18n-placeholder="enroll.model.placeholder">
+            </div>
+            <div class="field">
+              <label class="field__label" for="ec-gateway" data-i18n="enroll.gateway">Gateway URL</label>
+              <input class="input input--mono" id="ec-gateway" type="text" value="https://gw.nanhara.tech" data-i18n-placeholder="enroll.gateway.placeholder">
+            </div>
+            <button type="button" class="btn mt-1" id="ec-create" data-i18n="enroll.mint">Mint code</button>
+          </div>
+          <div id="ec-result" class="hidden">
+            <h3 class="mb-1" data-i18n="enroll.result.title">Enrollment ready</h3>
+            <div class="field">
+              <label class="field__label" data-i18n="enroll.result.code">Code</label>
+              <div class="copybox copybox--big mono">
+                <span id="ec-code-text"></span>
+                <button type="button" class="btn-icon copybox__copy" data-copy-from="#ec-code-text"
+                        data-i18n-title="enroll.copy" title="Copy">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field__label" data-i18n="enroll.result.cmd">Command</label>
+              <div class="copybox">
+                <span id="ec-cmd-text"></span>
+                <button type="button" class="btn-icon copybox__copy" data-copy-from="#ec-cmd-text"
+                        data-i18n-title="enroll.copy" title="Copy">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                </button>
+              </div>
+              <div class="field__hint" data-i18n="enroll.result.cmd.hint">Paste this on the target machine.</div>
+            </div>
+            <div class="field">
+              <label class="field__label" data-i18n="enroll.result.expires">Expires</label>
+              <div class="mono small" id="ec-expires"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- USERS -->
+    <section class="view hidden" id="view-users" data-view="users">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.users">Users</h1>
+          <p class="view__subtitle" data-i18n="users.hint">SUPERADMIN only — manage console accounts.</p>
+        </div>
+        <div class="view__actions">
+          <button type="button" class="btn" id="users-new-btn">
+            <span data-i18n="users.new">New user</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="users-table"></div>
+    </section>
+
+    <!-- SECURITY -->
+    <section class="view hidden" id="view-security" data-view="security">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.security">Security</h1>
+          <p class="view__subtitle" data-i18n="security.hint">Two-factor authentication (TOTP).</p>
+        </div>
+      </div>
+
+      <div class="card card--accent">
+        <p class="mb-0 text-soft" data-i18n="security.public_notice">This console is on the public internet. Two-factor is strongly recommended for every account.</p>
+      </div>
+
+      <section class="card">
+        <div id="sec-status-msg" class="mb-2 text-soft">—</div>
+
+        <!-- ENABLE flow -->
+        <div id="sec-enable-wrap" class="hidden">
+          <button type="button" class="btn" id="sec-enable-start" data-i18n="security.enable">Enable two-factor</button>
+
+          <div id="sec-enable-step2" class="hidden mt-3">
+            <p class="text-soft" data-i18n="security.enable.step1">Scan this QR code with your authenticator app.</p>
+            <div class="qrbox mt-2" id="sec-qr-box" aria-label="QR code"></div>
+
+            <details class="mt-2">
+              <summary class="btn-link" data-i18n="security.enable.show_secret">Show secret (manual entry)</summary>
+              <div class="mt-1">
+                <div class="field">
+                  <label class="field__label" data-i18n="security.enable.secret_label">Secret (base32)</label>
+                  <div class="copybox">
+                    <span id="sec-secret"></span>
+                    <button type="button" class="btn-icon copybox__copy" data-copy-from="#sec-secret"
+                            data-i18n-title="common.copy" title="Copy">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                    </button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field__label" data-i18n="security.enable.uri_label">otpauth URI</label>
+                  <div class="copybox">
+                    <span id="sec-uri"></span>
+                    <button type="button" class="btn-icon copybox__copy" data-copy-from="#sec-uri"
+                            data-i18n-title="common.copy" title="Copy">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <div class="field mt-2">
+              <label class="field__label" for="sec-enable-code" data-i18n="security.enable.step2">Enter the 6-digit code your app is showing right now.</label>
+              <div class="row">
+                <input class="input input--mono" id="sec-enable-code" type="text"
+                       inputmode="numeric" pattern="\d{6}" maxlength="6"
+                       data-i18n-placeholder="security.enable.code.placeholder">
+                <button type="button" class="btn row__fixed" id="sec-enable-confirm" data-i18n="security.enable.confirm">Activate</button>
+                <button type="button" class="btn-ghost row__fixed" id="sec-enable-cancel" data-i18n="security.enable.cancel">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DISABLE flow -->
+        <div id="sec-disable-wrap" class="hidden">
+          <div class="field">
+            <label class="field__label" for="sec-disable-code" data-i18n="security.disable.code">Current 6-digit code</label>
+            <div class="row">
+              <input class="input input--mono" id="sec-disable-code" type="text"
+                     inputmode="numeric" pattern="\d{6}" maxlength="6"
+                     data-i18n-placeholder="security.disable.code.placeholder">
+              <button type="button" class="btn-danger row__fixed" id="sec-disable-go" data-i18n="security.disable.go">Disable two-factor</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+  </main>
+</div>
+
+<!-- ── MODAL HOST ─────────────────────────────────────────────────── -->
+<div id="modal-host"></div>
+
+<!-- ── TOAST ─────────────────────────────────────────────────────── -->
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+<!-- ── SCRIPTS ─────────────────────────────────────────────────────
+     load order is important — i18n dicts before app.js so I18N has data,
+     QR lib before app.js so it can be invoked when Security view opens. -->
+<script src="lib/qrcode.min.js"></script>
+<script src="i18n/en.js"></script>
+<script src="i18n/zh-CN.js"></script>
+<script src="i18n/zh-TW.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>

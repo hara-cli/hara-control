@@ -1,11 +1,12 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { AdminService } from "./admin.service";
-import { AdminKeyGuard } from "../common/admin-key.guard";
+import { AdminAuthGuard } from "../common/admin-auth.guard";
 import { CreateEnrollCodeDto, CreateOrgDto } from "../protocol/dto";
 
-// Operator-facing endpoints — gated by the admin key. Phase 2 swaps the guard for OIDC/RBAC.
+// Operator-facing endpoints — gated by AdminAuthGuard (JWT OR back-compat x-admin-key).
+// Default required role = ADMIN (set in the guard). User-mgmt (SUPERADMIN) lives in AuthModule.
 @Controller("admin")
-@UseGuards(AdminKeyGuard)
+@UseGuards(AdminAuthGuard)
 export class AdminController {
   constructor(private readonly admin: AdminService) {}
 

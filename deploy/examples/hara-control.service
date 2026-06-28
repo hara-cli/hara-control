@@ -1,0 +1,27 @@
+# systemd unit for hara-control. See docs/selfhost.md §②.
+#   sudo cp deploy/examples/hara-control.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now hara-control
+#   journalctl -u hara-control -f
+# (Run the LiteLLM data plane as its own unit the same way — ExecStart the venv litellm.)
+
+[Unit]
+Description=hara-control (control plane)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=hara
+WorkingDirectory=/opt/hara-control
+EnvironmentFile=/opt/hara-control/.env
+ExecStart=/usr/bin/node /opt/hara-control/dist/main.js
+Restart=always
+RestartSec=3
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/hara-control
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

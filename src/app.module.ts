@@ -11,8 +11,23 @@ import { AssetsModule } from "./assets/assets.module";
 import { EmbeddingModule } from "./embed/embedding.module";
 import { WorkModule } from "./work/work.module";
 import { SecretsModule } from "./security/secrets.module";
+import { AuthModule } from "./auth/auth.module";
 
 @Module({
-  imports: [PrismaModule, OrgModule, GatewayModule, AuditModule, LicenseModule, EmbeddingModule, EnrollModule, AdminModule, RolesModule, AssetsModule, WorkModule, SecretsModule],
+  imports: [
+    PrismaModule,
+    OrgModule,
+    GatewayModule,
+    AuditModule,
+    LicenseModule,
+    EmbeddingModule,
+    EnrollModule,
+    AdminModule,
+    RolesModule,
+    AssetsModule,
+    WorkModule,
+    SecretsModule,
+    AuthModule,
+  ],
 })
 export class AppModule {}

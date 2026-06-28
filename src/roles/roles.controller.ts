@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { RolesService } from "./roles.service";
-import { AdminKeyGuard } from "../common/admin-key.guard";
+import { AdminAuthGuard } from "../common/admin-auth.guard";
 import {
   AddMemberDto,
   CreateAssignmentDto,
@@ -14,9 +14,9 @@ import {
 
 const bearer = (h?: string): string | undefined => (h?.startsWith("Bearer ") ? h.slice(7) : undefined);
 
-// Operator-facing role/digital-employee governance. admin-key gated (Phase 2 → OIDC/RBAC).
+// Operator-facing role/digital-employee governance. Auth guard accepts JWT or shared admin key.
 @Controller("admin")
-@UseGuards(AdminKeyGuard)
+@UseGuards(AdminAuthGuard)
 export class RolesController {
   constructor(private readonly roles: RolesService) {}
 

@@ -105,6 +105,15 @@ the user approves in any browser; the CLI polls. Standard, and the same plumbing
 - `hara logout` (clear org.json + best-effort revoke), `hara whoami`.
 - **The gateway URL is required input** (each company self-hosts at its own domain/IP — unavoidable, same as `gh auth login --hostname`): positional arg, else interactive prompt; **saved in org.json** so re-login doesn't re-ask; accept bare `host:port`.
 
+### Implementation seam (grounded in `src/enroll/enroll.service.ts`)
+The device flow is a *thin add-on* — it reuses the existing enroll machinery, so the new surface is small:
+- **Factor out token issuance.** `EnrollService.enroll()` already does the tail `seatCheck → Device.create → gateway.issueKey → DeviceToken.create (sha256 hash, TTL) → return {device_token, device_id, model, base_url}`. Extract that tail into `issueDeviceToken({ orgId, personId, model, baseUrl, device })`. Then **both** `POST /v1/enroll` (code path, unchanged) and `POST /devices/self-enroll` (JWT path, new) call the same function → identical token shape, one code path, one place for token discipline.
+- **`/devices/self-enroll`** = `issueDeviceToken({ orgId: user.orgId, personId: user.personId, model: <org default model>, device })`, gated by the Phase-1 Bearer **user** JWT. No `enrollCode` row is created — the *user JWT itself* is the proof of identity (the device flow already authenticated the person); it replaces the admin-minted code.
+- **Binding step** (`/auth/device/code` → approve): persist a `DeviceAuth { deviceCode, userCode, status: pending|approved, userId?, expiresAt }`. The `verification_uri` page **reuses the Phase-1 `/auth/login`** session; once logged in, the user confirms the `userCode` → set `status=approved, userId`. `/auth/device/token` polls that row and returns the user JWT once approved (RFC 8628 `authorization_pending` / `slow_down` until then, single-use, short `expires_in`).
+- **Reuse unchanged:** `entitlement.seatCheck(orgId)`, `security/token-discipline` (TTL + revocation + spend-cap), `AuditService.log(orgId, "self-enroll", "device", …)`, `sha256(key)` at-rest hashing. `hara enroll --code` stays as the headless/CI fallback (it shares `issueDeviceToken`).
+
+> **Prerequisite ordering:** Phase 1 (`User`+`Role`, `/auth/login`, JWT, `AdminAuthGuard`) must land first — the device flow's whole point is to swap a *person login* for a device token, so person logins must exist. Until Phase 1 **and** 2 ship, `hara enroll --code` (admin mints in console → user pastes) remains the only working path — which is exactly what hara does today.
+
 ---
 
 ## Phase 3 — SSO / MFA  (enterprise, thin gate)

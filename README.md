@@ -81,6 +81,74 @@ Config knobs for the above are in [`.env.example`](./.env.example).
 | DB | **PostgreSQL** | LiteLLM is PG-native (direct spend-table joins); JSONB for policy/audit; RLS for multi-tenancy |
 | Data plane | **LiteLLM** (sidecar) | mature OSS gateway, MIT core, covers cloud + self-hosted + `/v1/messages` |
 
+## Run with Docker
+
+The published image — [`ghcr.io/hara-cli/hara-control`](https://github.com/hara-cli/hara-control/pkgs/container/hara-control), multi-arch (amd64 + arm64) — is the self-host artifact. It needs a **PostgreSQL** database; on boot the container runs `prisma migrate deploy`, so the **tables are created automatically**. You only have to provide an (empty) database and point `DATABASE_URL` at it.
+
+### Option A — Docker Compose (brings its own Postgres)
+
+The `postgres` service **creates the `hara_control` database** for you (via `POSTGRES_DB`); the control plane connects to it and migrates on start. Save as `docker-compose.yml` and `docker compose up -d`:
+
+```yaml
+services:
+  postgres:
+    image: pgvector/pgvector:pg16          # Postgres 16 (+pgvector for later semantic search)
+    environment:
+      POSTGRES_USER: hara
+      POSTGRES_PASSWORD: hara
+      POSTGRES_DB: hara_control            # ← the database, created on first boot
+    volumes:
+      - hara-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hara -d hara_control"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  control:
+    image: ghcr.io/hara-cli/hara-control:latest   # pin a version in prod, e.g. :0.1.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://hara:hara@postgres:5432/hara_control
+      HARA_CONTROL_ADMIN_KEY: change-me    # ← admin API key (sent as the x-admin-key header)
+      GATEWAY_ADAPTER: mock                # control-plane only; no LiteLLM data plane
+    ports:
+      - "4100:4100"
+
+volumes:
+  hara-pgdata:
+```
+
+Then open the admin console at **http://localhost:4100/console/**, and smoke-test the admin API:
+
+```bash
+curl -X POST localhost:4100/admin/orgs \
+  -H 'x-admin-key: change-me' -H 'content-type: application/json' \
+  -d '{"name":"acme"}'
+```
+
+### Option B — `docker run` against your own Postgres
+
+Already running Postgres? Create an **empty** database, then point the container at it — the schema is created automatically on boot, so there's no manual migration step.
+
+```bash
+# 1. create the database once (via psql, or your managed-Postgres console):
+createdb hara_control                       # or:  psql -c 'CREATE DATABASE hara_control;'
+
+# 2. run the control plane (tables auto-migrate on start):
+docker run -d --name hara-control -p 4100:4100 \
+  -e DATABASE_URL='postgresql://USER:PASSWORD@HOST:5432/hara_control' \
+  -e HARA_CONTROL_ADMIN_KEY='change-me' \
+  -e GATEWAY_ADAPTER=mock \
+  ghcr.io/hara-cli/hara-control:latest
+```
+
+Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database>` (append `?schema=public` if your provider needs it). `HOST` is your Postgres host — a container name on a shared Docker network, `host.docker.internal` for a DB on the host machine, or a managed endpoint.
+
+> **Env:** the minimum to boot is `DATABASE_URL` + `HARA_CONTROL_ADMIN_KEY`. `GATEWAY_ADAPTER=mock` runs the control plane without the LiteLLM data plane; see [`.env.example`](./.env.example) for the full set (LiteLLM upstream, KMS, SSRF, device-token TTL, …).
+
 ## Status
 
 - **Phase 0 — spike: ✅ done.** LiteLLM proxies Anthropic `/v1/messages` with streaming + tool calls

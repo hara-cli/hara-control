@@ -1,0 +1,16 @@
+# Keep the build context small + never ship local state/secrets into the image.
+node_modules
+dist
+.git
+.github
+.env
+.env.*
+*.log
+npm-debug.log*
+test
+deploy
+docs
+litellm
+phase0
+postgres-data
+.DS_Store

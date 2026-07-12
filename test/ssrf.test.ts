@@ -22,6 +22,9 @@ test("isPrivateIPv4: classifies RFC1918 / loopback / link-local / CGNAT", () => 
 test("isAlwaysBlockedIP: metadata + link-local always blocked; loopback is NOT always-blocked (localhost-friendly default)", () => {
   assert.equal(isAlwaysBlockedIP("169.254.169.254"), true, "cloud metadata endpoint");
   assert.equal(isAlwaysBlockedIP("fe80::1"), true, "ipv6 link-local");
+  assert.equal(isAlwaysBlockedIP("fe90::1"), true, "full fe80::/10 link-local range");
+  assert.equal(isAlwaysBlockedIP("febf::1"), true, "upper edge of fe80::/10");
+  assert.equal(isAlwaysBlockedIP("fec0::1"), false, "outside fe80::/10");
   assert.equal(isAlwaysBlockedIP("0.0.0.0"), true, "unspecified");
   assert.equal(isAlwaysBlockedIP("::ffff:169.254.169.254"), true, "ipv4-mapped metadata");
   // loopback is "private" (blockable on opt-in / via allow-list), not always-blocked, so the normal
@@ -35,6 +38,9 @@ test("isPrivateIPv6: loopback / ULA / link-local / mapped", () => {
   assert.equal(isPrivateIPv6("::1"), true);
   assert.equal(isPrivateIPv6("fd00::1"), true);
   assert.equal(isPrivateIPv6("fe80::abcd"), true);
+  assert.equal(isPrivateIPv6("fea0::abcd"), true, "link-local is /10, not just fe80::/16");
+  assert.equal(isPrivateIPv6("febf::abcd"), true);
+  assert.equal(isPrivateIPv6("fec0::abcd"), false);
   assert.equal(isPrivateIPv6("::ffff:10.0.0.1"), true);
   assert.equal(isPrivateIPv6("2606:4700:4700::1111"), false, "public dns");
 });

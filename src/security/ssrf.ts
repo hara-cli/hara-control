@@ -61,11 +61,18 @@ export function isPrivateIPv4(ip: string): boolean {
   return false;
 }
 
+/** IPv6 link-local is fe80::/10, i.e. first hextet fe80 through febf. */
+function isIPv6LinkLocal(ip: string): boolean {
+  const v = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  const first = Number.parseInt(v.split(":", 1)[0], 16);
+  return Number.isFinite(first) && (first & 0xffc0) === 0xfe80;
+}
+
 /** True if an IPv6 string is loopback / link-local / ULA / unspecified, incl. IPv4-mapped private. */
 export function isPrivateIPv6(ip: string): boolean {
   const v = ip.toLowerCase().replace(/^\[|\]$/g, "");
   if (v === "::1" || v === "::") return true; // loopback / unspecified
-  if (v.startsWith("fe80")) return true; // link-local
+  if (isIPv6LinkLocal(v)) return true;
   if (v.startsWith("fc") || v.startsWith("fd")) return true; // ULA fc00::/7
   // IPv4-mapped (::ffff:a.b.c.d) / IPv4-compatible — unwrap and re-check
   const mapped = v.match(/(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
@@ -88,7 +95,7 @@ export function isAlwaysBlockedIP(ip: string): boolean {
   }
   if (fam === 6) {
     const v = ip.toLowerCase().replace(/^\[|\]$/g, "");
-    if (v === "::" || v.startsWith("fe80")) return true; // unspecified + link-local
+    if (v === "::" || isIPv6LinkLocal(v)) return true; // unspecified + link-local
     const mapped = v.match(/(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
     if (mapped) {
       const [a, b] = mapped[1].split(".").map(Number);

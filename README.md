@@ -106,7 +106,7 @@ services:
       retries: 10
 
   control:
-    image: ghcr.io/hara-cli/hara-control:latest   # pin a version in prod, e.g. :0.1.1
+    image: ghcr.io/hara-cli/hara-control:0.1.2   # pin releases in production
     depends_on:
       postgres:
         condition: service_healthy
@@ -142,7 +142,7 @@ docker run -d --name hara-control -p 4100:4100 \
   -e DATABASE_URL='postgresql://USER:PASSWORD@HOST:5432/hara_control' \
   -e HARA_CONTROL_ADMIN_KEY='change-me' \
   -e GATEWAY_ADAPTER=mock \
-  ghcr.io/hara-cli/hara-control:latest
+  ghcr.io/hara-cli/hara-control:0.1.2
 ```
 
 Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database>` (append `?schema=public` if your provider needs it). `HOST` is your Postgres host — a container name on a shared Docker network, `host.docker.internal` for a DB on the host machine, or a managed endpoint.

@@ -10,28 +10,61 @@ name: publish-image
 
 on:
   push:
+    branches: [master]
     tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  image:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Require the release tag to match package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$tag_version" != "$package_version" ]; then
+            echo "Release tag v${tag_version} does not match package.json ${package_version}." >&2
+            exit 1
+          fi
+      - name: Audit production dependencies against the official registry
+        run: npm audit --omit=dev --registry=https://registry.npmjs.org
+      - run: npm test
+      - run: npm run build
+      - name: Validate the Prisma schema
+        env:
+          DATABASE_URL: postgresql://hara:validation-only@localhost:5432/hara_control
+        run: npx prisma validate
+
+  image:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
       # QEMU registers binfmt handlers so buildx can cross-build linux/arm64 on the x86 runner (emulated).
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/hara-cli/hara-control
           # latest=auto → the `latest` tag tracks the newest non-prerelease semver tag.
@@ -39,7 +72,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true

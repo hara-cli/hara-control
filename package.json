@@ -1,6 +1,6 @@
 {
   "name": "hara-control",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Closed-source control plane for the hara fleet (B-end).",
   "license": "UNLICENSED",
@@ -15,9 +15,9 @@
     "test": "node --test --import tsx test/*.test.ts"
   },
   "dependencies": {
-    "@nestjs/common": "^11.0.0",
-    "@nestjs/core": "^11.0.0",
-    "@nestjs/platform-express": "^11.0.0",
+    "@nestjs/common": "^11.1.28",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/platform-express": "^11.1.28",
     "@prisma/client": "^6.2.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
-    "@nestjs/testing": "^11.0.0",
+    "@nestjs/testing": "^11.1.28",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
     "prisma": "^6.2.0",

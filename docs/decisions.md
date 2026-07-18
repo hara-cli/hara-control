@@ -1,22 +1,32 @@
 # hara-control — decision record
 
-## Open-core boundary (2026-06-22)
+## Open-core boundary (2026-07-18, current)
 
 - **hara CLI** = Apache-2.0 OSS, free for C-end individual use. It's the funnel.
-- **hara-control** (this repo) = **closed-source, proprietary, Nanhara-owned**. Only organizations
-  (B-end) need a fleet control plane. Delivered as on-prem license or managed SaaS.
-- Rationale: the open part (the whole CLI) is already a complete product for an individual, so the
-  control plane doesn't need to be open. Self-deployment ≠ open source — closed software is routinely
-  self-hosted under license; a customer demanding a source audit can get it under NDA without changing
-  the license. No BSL/source-available gymnastics needed.
+- **hara-control** (this repo) = **Apache-2.0 self-hosted control core**. Its public repository and
+  historical `LICENSE` have already granted Apache rights; package metadata and product documentation
+  must agree with that fact.
+- Open here: device enrollment, token revoke, single-organization fleet, three-role RBAC, basic
+  policy, local audit, protocol and self-host deployment.
+- Private elsewhere: Nanhara-operated hosting, regional account/order/entitlement services,
+  marketplace operations, SSO/SCIM, DLP, private catalog, centralized audit retention/export and SLA.
+- Rationale: safety and self-host foundations should remain inspectable and useful without an account.
+  Commercial value comes from reliable operation, scale governance, integrations and curated content,
+  not from contradicting an already-public license.
+
+The 2026-06-22 proposal to keep this implementation proprietary is superseded by this decision. It
+was never consistent with the repository's public Apache-2.0 LICENSE and must not be used to claim
+that existing Apache grants can be withdrawn.
 
 ## Data plane vs control plane
 
 - **Data plane = bought/embedded** (LiteLLM, Python sidecar behind a thin adapter). Protocol
   translation, routing to N upstreams (cloud + customer self-hosted), streaming, retries, upstream-key
   vault. Commodity; zero differentiation; do not fork.
-- **Control plane = built + 100% owned** (this repo). Enrollment, token lifecycle, fleet view,
-  governance, audit, multi-tenancy. The product / moat / paid layer.
+- **Control core = built in the open** (this repo). Enrollment, token lifecycle, fleet view, baseline
+  governance and local audit.
+- **Hosted/enterprise plane = built privately in separate repositories.** Regional services,
+  managed operation, organization-scale governance and commercial content are the paid layer.
 
 ## Stack
 
@@ -32,7 +42,8 @@
 - Company's existing **MySQL** production DBs are unrelated and untouched; hara-control's Postgres is
   its own.
 - **Shared protocol types: `@nanhara/hara-protocol`** (enroll / heartbeat / token DTOs) live on the
-  open CLI side; this closed server depends on the open package. Open contract, closed implementation.
+  open CLI side; this open server depends on the open package. Private services consume released
+  public contracts and never copy private implementation back into the public repository.
 
 ## Phase 0 spike — ✅ PASS (2026-06-22)
 

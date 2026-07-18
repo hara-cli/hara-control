@@ -51,7 +51,7 @@ Config knobs for the above are in [`.env.example`](./.env.example).
 ## Architecture (decided)
 
 ```
- hara CLI (OSS, Apache)            hara-control (this repo, closed)
+ hara CLI (OSS, Apache)            hara-control (this repo, Apache-2.0)
  provider = "hara-gateway"   ┌──────────────────────────────────────────┐
  device token, no real key   │  NestJS control plane  ──────┐           │
         │                    │   enroll · tokens · fleet ·   │  Postgres │
@@ -70,7 +70,8 @@ Config knobs for the above are in [`.env.example`](./.env.example).
 - **Shared DB**: hara-control and LiteLLM share **one Postgres** so the fleet usage view can `JOIN`
   the device registry against LiteLLM's spend tables directly (no cross-DB ETL).
 - **Shared protocol types**: `@nanhara/hara-protocol` (enroll / heartbeat / token DTOs) lives on the
-  open CLI side; this closed server depends on it.
+  open CLI side; this open self-hosted control plane depends on it. Hosted operations, account/
+  market services, and enterprise extensions stay in physically separate private repositories.
 
 ## Stack
 

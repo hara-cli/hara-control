@@ -8,6 +8,14 @@ const receiver = readFileSync(
   resolve("deploy/nanhara-tech/release-receiver.sh"),
   "utf8",
 );
+const liteLlmRequirements = readFileSync(
+  resolve("deploy/nanhara-tech/requirements-litellm.txt"),
+  "utf8",
+);
+const liteLlmInstaller = readFileSync(
+  resolve("scripts/ensure-litellm-venv.sh"),
+  "utf8",
+);
 
 test("tag release deploys only after the verified multi-arch image through a protected environment", () => {
   assert.match(workflow, /deploy_production:\n\s+needs: image/);
@@ -43,4 +51,13 @@ test("forced receiver backs up code and preserves every production secret/runtim
   ]) {
     assert.ok(receiver.includes(`--exclude='${boundary}'`), `missing preserved boundary: ${boundary}`);
   }
+});
+
+test("LiteLLM runtime pins its database client and never reuses a drifted virtualenv", () => {
+  assert.match(liteLlmRequirements, /^litellm\[proxy\]==1\.92\.0$/m);
+  assert.match(liteLlmRequirements, /^prisma==0\.11\.0$/m);
+  assert.match(liteLlmInstaller, /REQUIREMENTS_SHA/);
+  assert.match(liteLlmInstaller, /TARGET="\$BASE\/\$VERSION-\$REQUIREMENTS_SHA"/);
+  assert.match(liteLlmInstaller, /import prisma/);
+  assert.match(liteLlmInstaller, /schema\.is_file\(\)/);
 });

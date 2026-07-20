@@ -107,7 +107,8 @@ bundle into `~/.hara/org-roles/` (the 0.70 feature) — verify with `hara roles`
   insufficient to recover encrypted provider credentials.
 - Control and LiteLLM use the same RDS instance only with explicit isolated schemas:
   `DATABASE_URL?...schema=public` and `LITELLM_DATABASE_URL?...schema=litellm`.
-- LiteLLM is pinned to 1.92.0 and rebuilt into a versioned virtualenv; mutable `main-stable` is forbidden.
+- LiteLLM is pinned to 1.92.0 with its exact Python Prisma runtime and rebuilt into a
+  requirements-fingerprinted virtualenv; mutable `main-stable` and dependency-drift reuse are forbidden.
 
 ## 8. Teardown
 ```bash

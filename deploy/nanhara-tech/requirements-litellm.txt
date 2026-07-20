@@ -1,3 +1,7 @@
 # Pinned production data-plane version. Keep this at or above the security floor documented in
 # deploy/nanhara-tech/DEPLOY.md; update only after the provider/enrollment smoke suite passes.
 litellm[proxy]==1.92.0
+# LiteLLM 1.92 keeps its database client in the separate `extra_proxy` extra. Pin the exact version
+# used by LiteLLM's own proxy development environment so a plain proxy install cannot start without
+# persistence while PM2 still reports the outer supervisor as online.
+prisma==0.11.0

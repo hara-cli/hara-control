@@ -57,11 +57,14 @@ test("LiteLLM runtime pins its database client and never reuses a drifted virtua
   assert.match(liteLlmRequirements, /^litellm\[proxy\]==1\.92\.0$/m);
   assert.match(liteLlmRequirements, /^prisma==0\.11\.0$/m);
   assert.match(liteLlmInstaller, /REQUIREMENTS_SHA/);
-  assert.match(liteLlmInstaller, /LAYOUT_VERSION="v2"/);
+  assert.match(liteLlmInstaller, /LAYOUT_VERSION="v3"/);
   assert.match(liteLlmInstaller, /TARGET="\$BASE\/\$LAYOUT_VERSION-\$VERSION-\$REQUIREMENTS_SHA"/);
   assert.match(liteLlmInstaller, /\.hara-runtime-complete/);
   assert.match(liteLlmInstaller, /expected_shebang="#!\$TARGET\/bin\/python3"/);
   assert.doesNotMatch(liteLlmInstaller, /mv "\$staging" "\$TARGET"/);
   assert.match(liteLlmInstaller, /import prisma/);
+  assert.match(liteLlmInstaller, /from prisma import Prisma/);
+  assert.match(liteLlmInstaller, /"\$TARGET\/bin\/prisma" generate --schema="\$schema"/);
+  assert.match(liteLlmInstaller, /DATABASE_URL="postgresql:\/\/unused:unused@127\.0\.0\.1:1\/unused"/);
   assert.match(liteLlmInstaller, /schema\.is_file\(\)/);
 });

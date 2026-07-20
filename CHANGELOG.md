@@ -14,6 +14,8 @@ All notable changes to hara-control are documented in this file.
   launches its supervised child instead of appearing online with no data-plane process.
 - Build Python virtual environments at their final immutable path before activation so generated
   console entrypoints keep valid absolute shebangs; incomplete runtimes now fail closed.
+- Generate and instantiate the pinned Prisma Python client during runtime assembly, matching
+  LiteLLM's official image build instead of discovering missing binaries after PM2 starts.
 
 ## 0.1.2 - 2026-07-13
 

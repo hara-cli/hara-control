@@ -19,7 +19,7 @@ BASE="$APP_DIR/.litellm-venvs"
 REQUIREMENTS_SHA="$(
   "$PYTHON_BIN" -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$REQUIREMENTS"
 )"
-LAYOUT_VERSION="v2"
+LAYOUT_VERSION="v3"
 TARGET="$BASE/$LAYOUT_VERSION-$VERSION-$REQUIREMENTS_SHA"
 COMPLETE="$TARGET/.hara-runtime-complete"
 CURRENT="$APP_DIR/.litellm-venv"
@@ -43,9 +43,11 @@ verify_runtime() {
 import pathlib
 import litellm
 import prisma
+from prisma import Prisma
 schema = pathlib.Path(litellm.__file__).parent / "proxy" / "schema.prisma"
 if not schema.is_file():
     raise SystemExit("LiteLLM proxy schema.prisma is missing")
+Prisma()
 '
   [ -x "$runtime/bin/litellm" ] || {
     echo "✗ managed LiteLLM console entrypoint is missing or not executable"
@@ -83,6 +85,18 @@ else
     echo "✗ installed Prisma Python $installed_prisma, expected $PRISMA_VERSION"
     exit 1
   }
+  schema="$("$TARGET/bin/python3" -c '
+import pathlib
+import litellm
+print(pathlib.Path(litellm.__file__).parent / "proxy" / "schema.prisma")
+')"
+  (
+    cd "$TARGET"
+    env \
+      PATH="$TARGET/bin:$PATH" \
+      DATABASE_URL="postgresql://unused:unused@127.0.0.1:1/unused" \
+      "$TARGET/bin/prisma" generate --schema="$schema"
+  )
   verify_runtime "$TARGET"
   printf '%s\n' "$REQUIREMENTS_SHA" > "$COMPLETE"
   chmod 600 "$COMPLETE"

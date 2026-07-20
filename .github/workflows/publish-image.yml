@@ -81,3 +81,54 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy_production:
+    needs: image
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: hara-control-production
+    concurrency:
+      group: hara-control-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Validate the pinned production SSH target
+        env:
+          DEPLOY_HOST: ${{ vars.HARA_CONTROL_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.HARA_CONTROL_DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.HARA_CONTROL_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.HARA_CONTROL_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HARA_CONTROL_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]]
+          (( DEPLOY_PORT >= 1 && DEPLOY_PORT <= 65535 ))
+          [[ "$DEPLOY_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
+      - name: Install the dedicated restricted deploy identity
+        env:
+          DEPLOY_KEY: ${{ secrets.HARA_CONTROL_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.HARA_CONTROL_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/hara-control-deploy"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/hara-control-deploy" "$HOME/.ssh/known_hosts"
+      - name: Deploy the exact verified tag through the forced command
+        env:
+          DEPLOY_HOST: ${{ vars.HARA_CONTROL_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.HARA_CONTROL_DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.HARA_CONTROL_DEPLOY_USER }}
+        run: |
+          ssh \
+            -i "$HOME/.ssh/hara-control-deploy" \
+            -p "$DEPLOY_PORT" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "deploy $GITHUB_REF_NAME $GITHUB_SHA"

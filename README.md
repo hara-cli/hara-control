@@ -34,7 +34,7 @@ short-lived, revocable token whose hash is what we store). Because it's now self
 v1 hardening status is:
 
 - ✅ **SSRF allow-list** on outbound fetches — link-local `169.254.0.0/16` (incl. `169.254.169.254`
-  metadata) + loopback always blocked, RFC1918 blockable, every redirect re-validated.
+  metadata) always blocked, RFC1918/loopback blockable or explicitly allow-listed, every redirect re-validated.
   `src/security/ssrf.ts`, wired into the LiteLLM + embeddings calls.
 - ✅ **Tamper-evident audit** — per-org hash-chained `AuditLog` + `verify()` (`GET /admin/audit/verify`).
   Signed checkpoints are the deferred enterprise extension.
@@ -42,8 +42,9 @@ v1 hardening status is:
   validation + a per-device/per-tenant spend-cap enforcement hook. `src/security/token-discipline.ts`.
 - 🟡 **Multi-tenant isolation** — Postgres RLS policies exist on all org-scoped tables; finishing it (a
   non-owner app role + `FORCE` + `WITH CHECK`) is documented in `HARDENING.md §A`.
-- 📝 **At-rest secrets** via envelope encryption / KMS — design + seam documented in `HARDENING.md §B`
-  (not yet implemented; upstream keys currently live in `.env`/LiteLLM).
+- ✅ **At-rest secrets** via AES-256-GCM envelope encryption / KMS. DeepSeek credential management
+  distinguishes the encrypted source-of-truth copy from the currently active LiteLLM runtime value;
+  activation is a controlled deploy/restart, never an implicit API-side restart.
 
 Self-hosted and hosted-by-Nanhara are different threat models; defaults target secure-by-default for self-hosters.
 Config knobs for the above are in [`.env.example`](./.env.example).
@@ -67,8 +68,9 @@ Config knobs for the above are in [`.env.example`](./.env.example).
 
 - **Two token layers**: device↔gateway = hara-issued token; gateway↔upstream = real provider key
   (only at the gateway, in a vault/env). **Real key never on the device** = core invariant.
-- **Shared DB**: hara-control and LiteLLM share **one Postgres** so the fleet usage view can `JOIN`
-  the device registry against LiteLLM's spend tables directly (no cross-DB ETL).
+- **Shared Postgres, isolated schemas**: hara-control uses `schema=public`; LiteLLM uses
+  `schema=litellm`. This keeps migrations/table names from colliding while still permitting an
+  explicitly-reviewed usage aggregation path without cross-database ETL.
 - **Shared protocol types**: `@nanhara/hara-protocol` (enroll / heartbeat / token DTOs) lives on the
   open CLI side; this open self-hosted control plane depends on it. Hosted operations, account/
   market services, and enterprise extensions stay in physically separate private repositories.
@@ -84,7 +86,15 @@ Config knobs for the above are in [`.env.example`](./.env.example).
 
 ## Run with Docker
 
-The published image — [`ghcr.io/hara-cli/hara-control`](https://github.com/hara-cli/hara-control/pkgs/container/hara-control), multi-arch (amd64 + arm64) — is the self-host artifact. It needs a **PostgreSQL** database; on boot the container runs `prisma migrate deploy`, so the **tables are created automatically**. You only have to provide an (empty) database and point `DATABASE_URL` at it.
+The published image — [`ghcr.io/hara-cli/hara-control`](https://github.com/hara-cli/hara-control/pkgs/container/hara-control), multi-arch (amd64 + arm64) — is the self-host artifact. It needs a **PostgreSQL** database; on boot the container runs `prisma migrate deploy`, so the **tables are created automatically**. Production also requires independent admin/JWT secrets and an envelope-encryption root. Generate them without printing their values:
+
+```bash
+install -d -m 700 secrets
+openssl rand -base64 32 > secrets/kms-master.key
+chmod 600 secrets/kms-master.key
+export HARA_CONTROL_ADMIN_KEY="$(openssl rand -hex 32)"
+export HARA_JWT_SECRET="$(openssl rand -hex 32)"
+```
 
 ### Option A — Docker Compose (brings its own Postgres)
 
@@ -107,14 +117,19 @@ services:
       retries: 10
 
   control:
-    image: ghcr.io/hara-cli/hara-control:0.1.2   # pin releases in production
+    image: ghcr.io/hara-cli/hara-control:0.1.3   # pin releases in production
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://hara:hara@postgres:5432/hara_control
-      HARA_CONTROL_ADMIN_KEY: change-me    # ← admin API key (sent as the x-admin-key header)
+      DATABASE_URL: postgresql://hara:hara@postgres:5432/hara_control?schema=public
+      HARA_CONTROL_ADMIN_KEY: ${HARA_CONTROL_ADMIN_KEY:?set a random admin key}
+      HARA_JWT_SECRET: ${HARA_JWT_SECRET:?set a different random JWT secret}
+      HARA_KMS_PROVIDER: local
+      HARA_KMS_KEYFILE: /run/hara-secrets/kms-master.key
       GATEWAY_ADAPTER: mock                # control-plane only; no LiteLLM data plane
+    volumes:
+      - ./secrets/kms-master.key:/run/hara-secrets/kms-master.key:ro
     ports:
       - "4100:4100"
 
@@ -126,7 +141,7 @@ Then open the admin console at **http://localhost:4100/console/**, and smoke-tes
 
 ```bash
 curl -X POST localhost:4100/admin/orgs \
-  -H 'x-admin-key: change-me' -H 'content-type: application/json' \
+  -H "x-admin-key: $HARA_CONTROL_ADMIN_KEY" -H 'content-type: application/json' \
   -d '{"name":"acme"}'
 ```
 
@@ -140,27 +155,37 @@ createdb hara_control                       # or:  psql -c 'CREATE DATABASE hara
 
 # 2. run the control plane (tables auto-migrate on start):
 docker run -d --name hara-control -p 4100:4100 \
-  -e DATABASE_URL='postgresql://USER:PASSWORD@HOST:5432/hara_control' \
-  -e HARA_CONTROL_ADMIN_KEY='change-me' \
+  -e DATABASE_URL='postgresql://USER:PASSWORD@HOST:5432/hara_control?schema=public' \
+  -e HARA_CONTROL_ADMIN_KEY -e HARA_JWT_SECRET \
+  -e HARA_KMS_PROVIDER=local \
+  -e HARA_KMS_KEYFILE=/run/hara-secrets/kms-master.key \
+  -v "$PWD/secrets/kms-master.key:/run/hara-secrets/kms-master.key:ro" \
   -e GATEWAY_ADAPTER=mock \
-  ghcr.io/hara-cli/hara-control:0.1.2
+  ghcr.io/hara-cli/hara-control:0.1.3
 ```
 
-Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database>` (append `?schema=public` if your provider needs it). `HOST` is your Postgres host — a container name on a shared Docker network, `host.docker.internal` for a DB on the host machine, or a managed endpoint.
+Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database>?schema=public`.
+`HOST` is your Postgres host — a container name on a shared Docker network,
+`host.docker.internal` for a DB on the host machine, or a managed endpoint.
 
-> **Env:** the minimum to boot is `DATABASE_URL` + `HARA_CONTROL_ADMIN_KEY`. `GATEWAY_ADAPTER=mock` runs the control plane without the LiteLLM data plane; see [`.env.example`](./.env.example) for the full set (LiteLLM upstream, KMS, SSRF, device-token TTL, …).
+> **Env:** the production minimum is `DATABASE_URL`, distinct `HARA_CONTROL_ADMIN_KEY` and
+> `HARA_JWT_SECRET`, plus exactly one KMS root source. `GATEWAY_ADAPTER=mock` runs the control plane
+> without the LiteLLM data plane. Formal managed AI additionally requires the isolated
+> `LITELLM_DATABASE_URL`, master key and encrypted provider-key activation described in
+> [`deploy/nanhara-tech/DEPLOY.md`](./deploy/nanhara-tech/DEPLOY.md).
 
 ## Status
 
 - **Phase 0 — spike: ✅ done.** LiteLLM proxies Anthropic `/v1/messages` with streaming + tool calls
   end-to-end (see [`phase0/`](./phase0/)).
-- **Phase 1 — MVP: 🟡 scaffolded.** NestJS + Prisma + Postgres. Endpoints: `POST /v1/enroll`,
+- **Phase 1 — MVP: ✅ implemented.** NestJS + Prisma + Postgres. Endpoints: `POST /v1/enroll`,
   `POST /v1/heartbeat` (device-facing, matches the CLI contract); `POST /admin/orgs`,
   `POST /admin/enroll-codes`, `GET /admin/fleet`, `POST /admin/devices/:id/revoke` (admin-key gated).
   Device tokens are gateway virtual keys behind the `GatewayAdapter` seam (LiteLLM in prod, an
-  in-process mock for dev/test); only token **hashes** are stored. Enroll-flow logic is unit-tested
-  offline (`npm test`, 3/3). **Pending:** `prisma migrate` + live e2e against Postgres, LiteLLM
-  adapter live test.
+  in-process mock for dev/test); only token **hashes** are stored. Production includes readiness,
+  atomic one-time enrollment, data-plane TTL/model scoping, encrypted DeepSeek source-of-truth and a
+  pinned LiteLLM runtime. **Pending hardening:** non-owner/forced RLS, external KMS adapters, signed
+  audit checkpoints and live spend-cap wiring.
 
 ### Run Phase 1 locally
 

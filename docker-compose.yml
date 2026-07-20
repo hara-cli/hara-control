@@ -24,7 +24,9 @@ services:
       retries: 10
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    # Immutable LiteLLM 1.92.0 multi-arch index. Do not use main-stable in production: mutable tags
+    # make security/version audit and deterministic rollback impossible.
+    image: litellm/litellm-database:v1.92.0@sha256:64d3547e0b131bf4638342e52c12bc46d6f1d9b8498e4b731ff31be5ab316ea9
     depends_on:
       postgres:
         condition: service_healthy

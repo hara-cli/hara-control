@@ -12,6 +12,8 @@ import { EmbeddingModule } from "./embed/embedding.module";
 import { WorkModule } from "./work/work.module";
 import { SecretsModule } from "./security/secrets.module";
 import { AuthModule } from "./auth/auth.module";
+import { HealthModule } from "./health/health.module";
+import { ProviderCredentialsModule } from "./providers/provider-credentials.module";
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { AuthModule } from "./auth/auth.module";
     WorkModule,
     SecretsModule,
     AuthModule,
+    HealthModule,
+    ProviderCredentialsModule,
   ],
 })
 export class AppModule {}

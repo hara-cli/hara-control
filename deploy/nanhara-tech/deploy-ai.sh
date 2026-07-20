@@ -12,9 +12,15 @@ COMPOSE="docker compose -f docker-compose.yml -f deploy/nanhara-tech/docker-comp
 cd "$APP_DIR"
 [ -f .env ] || { echo "✗ $APP_DIR/.env missing — cp deploy/nanhara-tech/.env.prod.example .env and fill it"; exit 1; }
 command -v node >/dev/null || { echo "✗ node not found (need >=20)"; exit 1; }
+
+# Parse/validate .env without executing it as shell. Re-enter once with the checked variables.
+if [ "${HARA_ENV_LOADED:-}" != "1" ]; then
+  node scripts/bootstrap-production-security.mjs "$APP_DIR/.env"
+  exec node scripts/with-production-env.mjs "$APP_DIR/.env" -- bash "$0" "$@"
+fi
+
 command -v pm2  >/dev/null || { echo "… installing pm2 globally"; npm i -g pm2; }
 
-set -a; . ./.env; set +a   # export .env so the data plane + Nest both see it
 PORT="${PORT:-4100}"
 
 if [ "${GATEWAY_ADAPTER:-mock}" = "litellm" ]; then
@@ -26,9 +32,16 @@ else
 fi
 
 echo "▶ install + build + migrate"
-npm ci
+npm ci --include=dev
 npm run build
 npx prisma migrate deploy
+if [ "${GATEWAY_ADAPTER:-mock}" = "litellm" ]; then
+  # This is the Docker-based TEST path: Compose still injects the env value into its container.
+  # Import is bootstrap-only and refuses to overwrite a different encrypted revision.
+  echo "▶ bootstrap/verify encrypted DeepSeek source of truth"
+  node dist/ops/provider-secret.js bootstrap-deepseek-env
+fi
+npm prune --omit=dev
 
 echo "▶ (re)start Nest on ${HOST:-127.0.0.1}:${PORT} via pm2 [$PM2_NAME]"
 if pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
@@ -40,5 +53,6 @@ pm2 save
 
 sleep 2
 echo "▶ health check"
-curl -fsS "http://127.0.0.1:${PORT}/" >/dev/null 2>&1 && echo "✓ Nest responding on 127.0.0.1:${PORT}" || echo "… Nest started; root may 404 (that's fine). Check: pm2 logs $PM2_NAME"
+curl -fsS "http://127.0.0.1:${PORT}/health/ready" >/dev/null
+echo "✓ Nest + dependencies ready on 127.0.0.1:${PORT}"
 echo "✓ done. Next: enroll a device — see DEPLOY.md §4."

@@ -61,14 +61,17 @@ row's `rowHash`), and `rowHash = sha256(canonicalJson(identity) + prevHash)` whe
 `@@index([orgId, seq])` and the tenant model). `canonicalJson` (in `src/common/crypto.ts`) sorts keys
 recursively so the hash is insertion-order independent and nested-payload tamper is detected.
 
-- **Append is atomic:** `log()` reads the chain head and inserts inside a `$transaction`, so concurrent
-  writes can't fork the chain.
+- **Append is atomic:** `log()` reads the chain head and inserts in a serializable transaction with
+  bounded conflict retries; a database uniqueness constraint on `(orgId, seq)` is the final
+  fail-closed guard against concurrent forks.
 - **Verification:** `AuditService.verify(orgId)` recomputes the chain and returns
   `{ ok, count, brokenAt? }`, pinpointing the first row whose `rowHash` or `prevHash` linkage breaks —
   i.e. any after-the-fact edit/delete/reorder. Exposed at `GET /admin/audit/verify?orgId=…`
   (admin-key gated).
-- **Backward-compatible:** new columns default to `''`/`0`; pre-existing rows have empty hashes and are
-  treated as the genesis prefix.
+- **Backward-compatible and honest:** pre-chain rows are retained as a stable, re-sequenced legacy
+  prefix. Verification reports `legacyPrefix` and does not claim those rows were cryptographically
+  anchored; the first new hashed row starts the verifiable suffix. Migration fails closed if a
+  duplicate sequence group contains any already-hashed row.
 
 **Tests:** `test/audit-chain.test.ts` (links rows, detects payload tamper, per-org isolation).
 
@@ -97,13 +100,17 @@ the hash + expiry, heartbeat enforces revocation/expiry.
 
 ### 4. At-rest secret envelope encryption / KMS adapter ✅
 
-**Status: implemented (envelope + `LocalKeyfileKms` + `SecretsService`). Cloud-KMS adapters and the
-`.env`→`Secret` importer remain deferred (clearly-labeled seams that throw).**
+**Status: implemented (envelope + `LocalKeyfileKms` + `SecretsService` + one-time provider import +
+supervised activation). Cloud-KMS adapters and root-key rotation remain deferred.**
 
 **What needs protecting at rest:** the **real upstream provider key** and the **LiteLLM master key**.
-Today these live in `.env` / process env and inside LiteLLM's own store. Device tokens are already
-hash-only at rest (good); the gap was the *upstream* credentials and any future per-org BYO-key — now
-closed by a `SecretsService` that envelope-encrypts every value through a pluggable `KmsAdapter`.
+The DeepSeek key is now envelope-encrypted in `Secret`; a supervised launcher decrypts the selected
+revision only into the LiteLLM child environment and records a non-secret activation revision. Its
+one-time bootstrap value is atomically blanked from the owner-only `.env`. Device tokens are hash-only
+in the control database and expire in both control and data planes. The LiteLLM master key remains an
+owner-only deployment secret and should move to an external secret manager in hosted production.
+The dockerless deploy starts only owner-only env-loader wrappers through PM2, then rejects any process
+definition or dump that serializes database, auth, KMS, LiteLLM, or provider credentials.
 
 **Where:**
 - `src/security/kms/kms-adapter.ts` — the seam (`KmsAdapter` interface + `Envelope`/`KmsContext` types +
@@ -113,6 +120,12 @@ closed by a `SecretsService` that envelope-encrypts every value through a plugga
 - `src/security/secrets.service.ts` + `secrets.module.ts` — `SecretsService.put/get/getString/remove`,
   wired `@Global` into `app.module.ts` (KMS adapter built **lazily** on first use so dev/test/CI boot
   without a master key, like `GATEWAY_ADAPTER` defaulting to the mock).
+- `src/ops/provider-secret.ts` — one-time DeepSeek import, plaintext `.env` scrubbing, and supervised
+  runtime activation without exposing values through the console/API.
+- `scripts/assert-pm2-env-safe.mjs` — fail-closed verification that PM2 persisted no protected runtime
+  values in either serialized environment snapshot.
+- `src/providers/provider-credentials.service.ts` — SUPERADMIN status/rotation/probes; responses
+  contain only lifecycle metadata, never values or credential-derived fingerprints.
 - Prisma `Secret` model + migration `prisma/migrations/20260626000000_secrets_store` (additive,
   `CREATE TABLE IF NOT EXISTS`, Postgres `BYTEA`).
 
@@ -146,11 +159,10 @@ DB-theft fails to decrypt).
 **Still deferred (designed, not built):**
 - **Cloud-KMS adapters** (`AwsKmsAdapter`, `GcpKmsAdapter`, `VaultTransitAdapter`) — seams throw with a
   configure hint; implement against the cloud root key when needed (HSM-backed root, no local CEK).
-- **The one-shot `.env`→`Secret` importer** — read existing `.env` upstream keys, `put()` them, then
-  remove the `.env` plaintext. The control-plane/LiteLLM wiring would then read the upstream key from
-  `SecretsService` at startup (decrypted into memory only) instead of `process.env`.
 - **DEK rotation tooling** — re-wrap stored `wrappedDek`s against a new CEK (the `keyRef` field is the
   hook; cross-CEK reads already fail clearly).
+- **External custody for the LiteLLM master/admin/JWT secrets** — today the formal dockerless path
+  keeps them distinct in an owner-only env file parsed as data, never sourced as shell.
 
 **Non-goals for v1:** HSM-backed signing, per-request key derivation. `LocalKeyfileKms` keeps
 self-hosters secure-by-default without a cloud dependency; the cloud adapter is the next increment.

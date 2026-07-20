@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { GatewayAdapter, IssuedKey, SpendRecord } from "./gateway-adapter";
+import { GatewayAdapter, GatewayReadiness, IssuedKey, SpendRecord } from "./gateway-adapter";
 import { randomId } from "../common/crypto";
 
 /** Offline/dev adapter — lets enroll/heartbeat/fleet be built + tested without a running LiteLLM. */
@@ -7,9 +7,9 @@ import { randomId } from "../common/crypto";
 export class MockGatewayAdapter implements GatewayAdapter {
   private readonly spend = new Map<string, number>();
 
-  async issueKey({ alias }: { model: string; alias: string }): Promise<IssuedKey> {
+  async issueKey({ alias, expiresAt }: { model: string; alias: string; expiresAt: Date }): Promise<IssuedKey> {
     this.spend.set(alias, 0);
-    return { key: randomId("sk-hara-mock-"), keyId: alias };
+    return { key: randomId("sk-hara-mock-"), keyId: alias, expiresAt };
   }
 
   async revokeKey(keyId: string): Promise<void> {
@@ -18,5 +18,9 @@ export class MockGatewayAdapter implements GatewayAdapter {
 
   async listSpend(keyIds: string[]): Promise<SpendRecord[]> {
     return keyIds.map((keyId) => ({ keyId, spend: this.spend.get(keyId) ?? 0 }));
+  }
+
+  async readiness(): Promise<GatewayReadiness> {
+    return { ok: true };
   }
 }

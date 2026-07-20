@@ -1,14 +1,17 @@
-import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { Inject, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
-import { GATEWAY_ADAPTER, GatewayAdapter } from "../gateway/gateway-adapter";
+import { GATEWAY_ADAPTER, GatewayAdapter, IssuedKey } from "../gateway/gateway-adapter";
 import { EntitlementService } from "../license/license.service";
 import { sha256 } from "../common/crypto";
 import { assertTokenUsable, deviceTokenExpiry } from "../security/token-discipline";
 import { DeviceInfoDto } from "../protocol/dto";
+import { resolveEnrollmentModel } from "../providers/model-policy";
 
 @Injectable()
 export class EnrollService {
+  private readonly log = new Logger(EnrollService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
@@ -23,26 +26,96 @@ export class EnrollService {
       throw new UnauthorizedException("bad or expired code");
     }
     await this.entitlement.seatCheck(ec.orgId); // licensed seat cap
+    const resolvedModel = resolveEnrollmentModel(ec.model);
 
-    const dev = await this.prisma.device.create({
-      data: {
-        orgId: ec.orgId,
-        name: device.name,
-        os: device.os,
-        haraVersion: device.hara_version,
-        enrollCodeId: ec.id,
-        personId: ec.personId ?? null, // per-person enroll: inherit this person's digital employees
+    // Claim the one-time code atomically before crossing the gateway boundary. A read followed by a
+    // plain update allows two concurrent enroll requests to both issue valid device keys.
+    const claim = await this.prisma.enrollCode.updateMany({
+      where: {
+        id: ec.id,
+        usedAt: null,
+        expiresAt: { gte: now },
       },
+      data: { usedAt: now },
     });
-    const issued = await this.gateway.issueKey({ model: ec.model, alias: dev.id, metadata: { orgId: ec.orgId } });
-    await this.prisma.deviceToken.create({
-      // short-TTL discipline: every issued token expires (HARA_DEVICE_TOKEN_TTL_MINUTES, default 7d)
-      data: { deviceId: dev.id, tokenHash: sha256(issued.key), gatewayKeyId: issued.keyId, model: ec.model, expiresAt: deviceTokenExpiry(now) },
-    });
-    await this.prisma.enrollCode.update({ where: { id: ec.id }, data: { usedAt: now } });
-    await this.audit.log(ec.orgId, "enroll", "device", dev.id, { name: device.name, os: device.os });
+    if (claim.count !== 1) {
+      throw new UnauthorizedException("bad or expired code");
+    }
 
-    return { device_token: issued.key, device_id: dev.id, model: ec.model, base_url: ec.baseUrl ?? undefined };
+    let dev: { id: string } | null = null;
+    let issued: IssuedKey | null = null;
+    try {
+      dev = await this.prisma.device.create({
+        data: {
+          orgId: ec.orgId,
+          name: device.name,
+          os: device.os,
+          haraVersion: device.hara_version,
+          enrollCodeId: ec.id,
+          personId: ec.personId ?? null, // per-person enroll: inherit this person's digital employees
+        },
+      });
+      const requestedExpiry = deviceTokenExpiry(now);
+      issued = await this.gateway.issueKey({
+        model: resolvedModel,
+        alias: dev.id,
+        expiresAt: requestedExpiry,
+        metadata: { orgId: ec.orgId },
+      });
+      await this.prisma.deviceToken.create({
+        // Use the gateway's authoritative expiry so control-plane and model data-plane access stop
+        // at the same instant. The adapter rejects a missing or unexpectedly late expiry.
+        data: {
+          deviceId: dev.id,
+          tokenHash: sha256(issued.key),
+          gatewayKeyId: issued.keyId,
+          model: resolvedModel,
+          expiresAt: issued.expiresAt,
+        },
+      });
+      await this.audit.log(ec.orgId, "enroll", "device", dev.id, { name: device.name, os: device.os });
+
+      return {
+        device_token: issued.key,
+        device_id: dev.id,
+        model: resolvedModel,
+        base_url: ec.baseUrl ?? undefined,
+        expires_at: issued.expiresAt.toISOString(),
+      };
+    } catch (error) {
+      // External key issue + local writes cannot be one database transaction. Compensate every
+      // completed boundary so an uncertain failure neither strands an alias nor consumes a code.
+      if (issued) {
+        try {
+          await this.gateway.revokeKey(issued.keyId);
+        } catch (cleanupError) {
+          this.log.error(
+            `failed to compensate gateway key for device ${dev?.id ?? "uncreated"}: ${(cleanupError as Error).message}`,
+          );
+        }
+      }
+      if (dev) {
+        try {
+          await this.prisma.device.delete({ where: { id: dev.id } });
+        } catch (cleanupError) {
+          this.log.error(
+            `failed to remove incomplete device ${dev.id}: ${(cleanupError as Error).message}`,
+          );
+        }
+      }
+      try {
+        // Compare against our exact claim timestamp so cleanup cannot release a later claim.
+        await this.prisma.enrollCode.updateMany({
+          where: { id: ec.id, usedAt: now },
+          data: { usedAt: null },
+        });
+      } catch (cleanupError) {
+        this.log.error(
+          `failed to restore enrollment code state for device ${dev?.id ?? "uncreated"}: ${(cleanupError as Error).message}`,
+        );
+      }
+      throw error;
+    }
   }
 
   /** Keep a device shown as online + record its current version. Validates the bearer device token. */

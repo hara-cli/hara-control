@@ -5,6 +5,7 @@ import { AuditService } from "../audit/audit.service";
 import { OrgTreeService } from "../org/org-tree.service";
 import { GATEWAY_ADAPTER, GatewayAdapter } from "../gateway/gateway-adapter";
 import { randomId } from "../common/crypto";
+import { resolveEnrollmentModel } from "../providers/model-policy";
 
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -45,17 +46,27 @@ export class AdminService {
   }
 
   async createEnrollCode(orgId: string, model = "", baseUrl?: string, ttlMinutes = 60, personId?: string, now = new Date()) {
+    let resolvedModel: string;
+    try {
+      resolvedModel = resolveEnrollmentModel(model);
+    } catch (error) {
+      throw new BadRequestException((error as Error).message);
+    }
     const ec = await this.prisma.enrollCode.create({
       data: {
         orgId,
         code: randomId("hara-", 9),
-        model,
+        model: resolvedModel,
         baseUrl: baseUrl ?? null,
         personId: personId ?? null,
         expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
       },
     });
-    await this.audit.log(orgId, "enroll_code.create", "admin", "", { model, ttlMinutes, personId });
+    await this.audit.log(orgId, "enroll_code.create", "admin", "", {
+      model: resolvedModel,
+      ttlMinutes,
+      personId,
+    });
     return { code: ec.code, expiresAt: ec.expiresAt };
   }
 

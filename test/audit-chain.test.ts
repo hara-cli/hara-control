@@ -81,3 +81,63 @@ test("audit chain: per-org isolation (separate chains)", async () => {
   assert.equal((await svc.verify("o1")).ok, true);
   assert.equal((await svc.verify("o2")).ok, true);
 });
+
+test("audit chain: preserves and reports an unauthenticated legacy prefix before the hashed suffix", async () => {
+  const p = fakePrisma();
+  p.rows.push(
+    {
+      id: "legacy-1",
+      orgId: "o1",
+      action: "legacy.one",
+      actorType: "system",
+      actorId: "",
+      payload: {},
+      at: new Date("2026-01-01T00:00:00Z"),
+      seq: 0,
+      prevHash: "",
+      rowHash: "",
+    },
+    {
+      id: "legacy-2",
+      orgId: "o1",
+      action: "legacy.two",
+      actorType: "system",
+      actorId: "",
+      payload: {},
+      at: new Date("2026-01-01T00:01:00Z"),
+      seq: 1,
+      prevHash: "",
+      rowHash: "",
+    },
+  );
+  const svc = svcFor(p);
+  await svc.log("o1", "anchored", "system");
+
+  const result = await svc.verify("o1");
+  assert.deepEqual(result, { ok: true, count: 3, legacyPrefix: 2 });
+  assert.equal(p.rows[2].seq, 2);
+  assert.equal(p.rows[2].prevHash, "");
+  assert.notEqual(p.rows[2].rowHash, "");
+});
+
+test("audit chain: append uses serializable isolation and retries a bounded write conflict", async () => {
+  const p = fakePrisma();
+  const baseTransaction = p.$transaction;
+  let attempts = 0;
+  let isolationLevel = "";
+  (p as unknown as {
+    $transaction: (
+      fn: (tx: unknown) => Promise<unknown>,
+      options?: { isolationLevel?: string },
+    ) => Promise<unknown>;
+  }).$transaction = async (fn, options) => {
+    attempts += 1;
+    isolationLevel = options?.isolationLevel ?? "";
+    if (attempts === 1) throw Object.assign(new Error("serialization conflict"), { code: "P2034" });
+    return baseTransaction(fn);
+  };
+  await svcFor(p).log("o1", "concurrent", "system");
+  assert.equal(attempts, 2);
+  assert.equal(isolationLevel, "Serializable");
+  assert.equal(p.rows.length, 1);
+});

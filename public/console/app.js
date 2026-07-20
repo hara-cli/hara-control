@@ -345,7 +345,8 @@
     if (r === "orgs" && lastInspectId) inspectOrg(lastInspectId);
     if (r === "enroll" && lastEnrollResult) paintEnrollResult(lastEnrollResult);
     if (r === "overview") refreshOverview();
-    // login + security copy is already data-i18n-driven so apply() handles them
+    if (r === "security" && me && me.role === "SUPERADMIN") loadProviderStatus();
+    // login + the remaining security copy is data-i18n-driven so apply() handles it
   };
 
   // ╔═══════════════════════════════════════════════════════════════════╗
@@ -832,7 +833,85 @@
       pendingSecret = "";
       pendingUri = "";
     }
+    const providerCard = $("#provider-security-card");
+    const canManageProvider = !!(me && me.role === "SUPERADMIN");
+    providerCard.classList.toggle("hidden", !canManageProvider);
+    if (canManageProvider) loadProviderStatus();
   }
+
+  async function loadProviderStatus() {
+    const out = $("#provider-status");
+    out.textContent = I18N.t("common.loading");
+    try {
+      const status = await api("GET", "/admin/providers/deepseek");
+      const yesNo = (value) => I18N.t(value ? "provider.status.yes" : "provider.status.no");
+      const readable = status.stored && !status.storage_readable
+        ? I18N.t("provider.status.unreadable")
+        : yesNo(status.stored);
+      const note = status.requires_activation
+        ? I18N.t("provider.status.needs_activation")
+        : status.active
+          ? I18N.t("provider.status.ready")
+          : "";
+      out.textContent = [
+        `${I18N.t("provider.status.stored")}: ${readable}`,
+        `${I18N.t("provider.status.runtime")}: ${yesNo(status.runtime_configured)}`,
+        `${I18N.t("provider.status.reachable")}: ${yesNo(status.runtime_reachable)}`,
+        `${I18N.t("provider.status.active")}: ${yesNo(status.active)}`,
+        note,
+      ].filter(Boolean).join(" · ");
+      $("#provider-test-stored").disabled = !status.stored || !status.storage_readable;
+      $("#provider-test-runtime").disabled = !status.runtime_configured;
+    } catch (e) {
+      out.textContent = e.message;
+    }
+  }
+
+  $("#provider-refresh").addEventListener("click", loadProviderStatus);
+
+  $("#provider-replace").addEventListener("click", () => {
+    openModal({
+      title: I18N.t("provider.key.title"),
+      body: I18N.t("provider.key.body"),
+      fields: [{
+        label: I18N.t("provider.key.label"),
+        type: "password",
+        placeholder: I18N.t("provider.key.placeholder"),
+        minlength: 8,
+        maxlength: 4096,
+      }],
+      primaryLabel: I18N.t("common.save"),
+      onConfirm: async (values, close) => {
+        const apiKey = values[0];
+        if (!apiKey) {
+          toast(I18N.t("provider.err.key_required"), "err");
+          return;
+        }
+        try {
+          await api("PUT", "/admin/providers/deepseek/credential", { apiKey });
+          values[0] = "";
+          close();
+          toast(I18N.t("provider.toast.saved"), "ok");
+          await loadProviderStatus();
+        } catch (e) {
+          toast(e.message, "err");
+        }
+      },
+    });
+  });
+
+  async function testProviderCredential(target) {
+    try {
+      await api("POST", "/admin/providers/deepseek/credential/test", { target });
+      toast(I18N.t("provider.toast.test_ok"), "ok");
+      await loadProviderStatus();
+    } catch (e) {
+      toast(e.message, "err");
+    }
+  }
+
+  $("#provider-test-stored").addEventListener("click", () => testProviderCredential("stored"));
+  $("#provider-test-runtime").addEventListener("click", () => testProviderCredential("runtime"));
 
   $("#sec-enable-start").addEventListener("click", async () => {
     try {

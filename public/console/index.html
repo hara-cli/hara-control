@@ -315,6 +315,7 @@
           </div>
         </div>
       </section>
+
     </section>
 
     <!-- USERS -->
@@ -409,6 +410,25 @@
             </div>
           </div>
         </div>
+      </section>
+
+      <section class="card hidden" id="provider-security-card">
+        <div class="view__header">
+          <div class="view__title-block">
+            <h2 class="card__title" data-i18n="provider.title">Managed AI provider</h2>
+            <p class="card__hint" data-i18n="provider.hint">DeepSeek credential storage and runtime activation status.</p>
+          </div>
+          <button type="button" class="btn-ghost" id="provider-refresh" data-i18n="provider.refresh">Refresh</button>
+        </div>
+        <div id="provider-status" class="provider-status text-soft" aria-live="polite">—</div>
+        <div class="row mt-2">
+          <button type="button" class="btn" id="provider-replace" data-i18n="provider.replace">Store / rotate key</button>
+          <button type="button" class="btn-ghost" id="provider-test-stored" data-i18n="provider.test_stored">Test stored key</button>
+          <button type="button" class="btn-ghost" id="provider-test-runtime" data-i18n="provider.test_runtime">Test active runtime</button>
+        </div>
+        <p class="field__hint mt-2" data-i18n="provider.activation_note">
+          Saving never silently restarts LiteLLM. A controlled deploy/restart loads the encrypted revision.
+        </p>
       </section>
     </section>
 

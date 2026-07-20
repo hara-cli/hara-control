@@ -1,8 +1,7 @@
-# gw.nanhara.tech — TEST control-plane deploy on the `ai` box
+# gw.nanhara.tech — hara-control deploy on the `ai` box
 
-A disposable staging gateway to dogfood the **distributed** B-end loop: laptop `hara` ↔ remote
-`hara-control` over real TLS/DNS — the path localhost e2e can't exercise. Separate `.tech` test domain
-keeps it off the production `nanhara.com` (ICP'd) site.
+This began as a staging gateway. Before treating it as formal service, use the production preflight,
+pinned LiteLLM runtime, encrypted provider-key copy and readiness checks described below.
 
 **Target:** `ai` = `112.124.201.107` (Aliyun, root). Has docker+compose, nginx, certbot. DNS for
 `nanhara.tech` is on alidns (same as nanhara.com) and `api.nanhara.tech` already points at `ai`.
@@ -11,7 +10,8 @@ keeps it off the production `nanhara.com` (ICP'd) site.
 > - **CN can't reach Docker Hub** from `ai`, and the box's configured mirrors are dead → the dockerized
 >   Postgres path failed. We pivoted to **Aliyun RDS PostgreSQL** (`pgm-…pg.rds.aliyuncs.com`, db `hara_db`,
 >   VPC-intranet, pgvector available) + a **dockerless** deploy (`deploy-ai-rds.sh`: `npm ci`→build→
->   `prisma migrate deploy`→pm2). All 8 migrations applied; Nest runs under pm2 on `127.0.0.1:4100`. Use
+>   `prisma migrate deploy`→pm2). Migrations are applied through Prisma; Nest runs under pm2 on
+>   `127.0.0.1:4100`. Use
 >   the npmmirror registry + `PRISMA_ENGINES_MIRROR` on the box.
 > - **`ai` is the LIVE prod backend box** (pm2 runs `yimatrix-api`, `nanyiapp-api`, …). Keep everything
 >   localhost-bound. It's an **oneinstack/LNMP** nginx with a `default_server reuseport` + `vhost/*.conf`;
@@ -25,7 +25,8 @@ keeps it off the production `nanhara.com` (ICP'd) site.
 - **R1 — control plane only** (`GATEWAY_ADAPTER=mock`): enroll → device token → `/v1/roles` (validates the
   0.70 org-role push-down) → heartbeat → fleet. No LLM, no key. **Do this first.**
 - **R2 — data-plane plumbing** (`litellm` + the Phase-0 mock upstream): real chat laptop→gw→LiteLLM→mock. Still no real key.
-- **R3 — real model**: `litellm` + a **regular** DashScope key (⚠️ never `sk-sp-`). Real glm-5/qwen traffic.
+- **R3 — real model**: pinned `litellm` + a regular DeepSeek pay-as-you-go key. Devices receive
+  revocable virtual keys; the provider key remains server-side.
 
 ---
 
@@ -51,33 +52,35 @@ ssh ai 'certbot certonly --nginx -d gw.nanhara.tech --non-interactive --agree-to
 # 4a. sync code laptop → ai (excludes node_modules/.git/local PG data)
 rsync -az --delete \
   --exclude node_modules --exclude .git --exclude postgres-data --exclude .env \
-  ~/work/projects/ai/hara-control/  ai:/opt/hara-control/
+  ~/work/projects/hara/hara-control/  ai:/opt/hara-control/
 
-# 4b. configure
+# 4b. configure without printing generated security values
 ssh ai 'cd /opt/hara-control && cp -n deploy/nanhara-tech/.env.prod.example .env \
-        && sed -i "s/__SET_A_STRONG_RANDOM__/$(openssl rand -hex 24)/" .env'
-#   (R1 leaves GATEWAY_ADAPTER=mock; for R2/R3 edit .env to litellm + keys)
+        && node scripts/bootstrap-production-security.mjs .env /etc/hara-control/kms-master.key'
+# Add the DeepSeek pay-as-you-go key directly on the host, then keep `.env` at 0600. Do not paste
+# credentials into tickets, chat, shell history, CI variables with public logs, or this document.
 
-# 4c. bring it up (idempotent: data plane → build → migrate → pm2)
-ssh ai 'cd /opt/hara-control && bash deploy/nanhara-tech/deploy-ai.sh'
+# 4c. bring it up against Aliyun RDS (idempotent: preflight → build → migrate → pinned data plane → pm2)
+ssh ai 'cd /opt/hara-control && bash deploy/nanhara-tech/deploy-ai-rds.sh'
 
 # 4d. nginx site (cert now exists → hardened conf validates)
 ssh ai 'cp /opt/hara-control/deploy/nanhara-tech/nginx-gw.nanhara.tech.conf /etc/nginx/conf.d/ \
         && nginx -t && systemctl reload nginx'
 ```
-Smoke: `curl -s https://gw.nanhara.tech/v1/roles` → 401 (needs a device token) = the path is live.
+Smoke: `curl -fsS http://127.0.0.1:4100/health/ready` on the host must return 200 before traffic
+promotion. `/health/live` only proves the Nest process exists; it is not a readiness substitute.
+The deploy also fails if PM2 serializes protected `.env` values instead of keeping only the env-loader
+wrapper and owner-only file path in its process definition.
 
 ## 5. Issue a token to your laptop
-Admin API is localhost-locked → reach it over an SSH tunnel:
+Admin API is localhost-locked → reach the console over an SSH tunnel. Bootstrap a real SUPERADMIN,
+enable TOTP, then use its short-lived JWT; do not extract the shared admin key into a laptop shell:
 ```bash
-ssh -fN -L 4100:127.0.0.1:4100 ai                       # tunnel admin to localhost
-K=$(ssh ai 'grep ^HARA_CONTROL_ADMIN_KEY /opt/hara-control/.env | cut -d= -f2')
-ORG=$(curl -s -XPOST localhost:4100/admin/orgs -H "x-admin-key: $K" \
-      -H 'content-type: application/json' -d '{"name":"nanhara-test"}' | jq -r .id)
-CODE=$(curl -s -XPOST localhost:4100/admin/enroll-codes -H "x-admin-key: $K" \
-      -H 'content-type: application/json' -d "{\"orgId\":\"$ORG\"}" | jq -r .code)
-echo "enroll code: $CODE"
+ssh -fN -L 4100:127.0.0.1:4100 ai
+open http://localhost:4100/console/
 ```
+Create the org and one-time enroll code in the console. The code is intentionally short-lived and
+single-use.
 On the laptop:
 ```bash
 hara enroll https://gw.nanhara.tech --code "$CODE"   # → device token in ~/.hara/org.json (0600)
@@ -87,14 +90,22 @@ Now `hara` routes through the gateway; the real key (R3) never leaves the box. R
 bundle into `~/.hara/org-roles/` (the 0.70 feature) — verify with `hara roles`.
 
 ## 6. Verify the loop
-- **R1:** `curl -s "localhost:4100/admin/fleet?orgId=$ORG" -H "x-admin-key: $K" | jq` → your device, `online`.
-- **R2/R3:** edit `.env` (`GATEWAY_ADAPTER=litellm` + keys), re-run `deploy-ai.sh`, then a normal `hara -p "hi"`
-  on the laptop should round-trip through the gateway.
+- **R1:** use the console Fleet view and confirm the enrolled device becomes `online`.
+- **R2/R3:** set `GATEWAY_ADAPTER=litellm`, re-run the deployment, require `/health/ready`=200, test
+  both the encrypted and active DeepSeek credential in Security, then verify a normal Hara request.
 
 ## 7. Security caveats (recap)
-- **Never** put a `sk-sp-` coding-plan key in `UPSTREAM_API_KEY` — gateway use gets it banned. Regular DashScope key only.
+- Use only a provider key whose terms permit server/gateway use.
 - PG (5433) + LiteLLM (4000) bound to 127.0.0.1 (prod overlay); `/admin/*` locked to localhost (tunnel).
-- It's a TEST: disposable DB, no real customer data, strong random admin key.
+- `.env` and the KMS keyfile are owner-only regular files; symlinks and group/other access fail deploy.
+- Admin/JWT/LiteLLM/provider/KMS values are distinct. Deployment imports the active provider key into
+  envelope-encrypted storage without displaying it, blanks the one-time env value, and starts
+  LiteLLM through the version-aware secret supervisor.
+- Back up the database and KMS root together. Either one without the other is intentionally
+  insufficient to recover encrypted provider credentials.
+- Control and LiteLLM use the same RDS instance only with explicit isolated schemas:
+  `DATABASE_URL?...schema=public` and `LITELLM_DATABASE_URL?...schema=litellm`.
+- LiteLLM is pinned to 1.92.0 and rebuilt into a versioned virtualenv; mutable `main-stable` is forbidden.
 
 ## 8. Teardown
 ```bash

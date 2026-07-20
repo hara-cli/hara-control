@@ -8,6 +8,8 @@ export interface IssuedKey {
   key: string;
   /** stable id we use to revoke later (we key off an alias we set, not the raw key) */
   keyId: string;
+  /** authoritative data-plane expiry returned by the gateway */
+  expiresAt: Date;
 }
 
 export interface SpendRecord {
@@ -15,10 +17,19 @@ export interface SpendRecord {
   spend: number;
 }
 
+export interface GatewayReadiness {
+  ok: boolean;
+}
+
 export interface GatewayAdapter {
-  issueKey(opts: { model: string; alias: string; metadata?: Record<string, unknown> }): Promise<IssuedKey>;
+  issueKey(opts: { model: string; alias: string; expiresAt: Date; metadata?: Record<string, unknown> }): Promise<IssuedKey>;
   revokeKey(keyId: string): Promise<void>;
   listSpend(keyIds: string[]): Promise<SpendRecord[]>;
+  /**
+   * Cheap process-level readiness only. It must not issue a provider completion, expose upstream
+   * details, or turn a paid model request into a public health-check side effect.
+   */
+  readiness(): Promise<GatewayReadiness>;
 }
 
 export const GATEWAY_ADAPTER = Symbol("GATEWAY_ADAPTER");

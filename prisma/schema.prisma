@@ -158,7 +158,8 @@ model AuditLog {
   rowHash   String   @default("") // sha256(canonical(this) + prevHash) — tamper-evidence anchor
 
   @@index([orgId, at])
-  @@index([orgId, seq])
+  // A unique sequence plus serializable/retried appends prevents concurrent chain forks.
+  @@unique([orgId, seq])
 }
 
 /// At-rest secret store (HARDENING.md §B). Envelope-encrypted via a KmsAdapter: the plaintext is
@@ -175,12 +176,41 @@ model Secret {
   ciphertext Bytes    // plaintext encrypted under the per-secret DEK (iv ‖ tag ‖ enc)
   wrappedDek Bytes    // per-secret DEK encrypted ("wrapped") under the KMS CEK (iv ‖ tag ‖ enc)
   keyRef     String   // which CEK/master key wrapped the DEK — drives rotation + multi-provider
+  version    Int      @default(1) // increments on rotation; safe lifecycle identity, never key-derived
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  // unique per (org, name); a null orgId is treated as a distinct global namespace by Postgres.
+  // Tenant secrets are unique here. PostgreSQL treats NULL values as distinct, so the migration
+  // also creates a partial unique index on name WHERE orgId IS NULL for global secrets.
   @@unique([orgId, name])
   @@index([orgId])
+}
+
+/// Control-plane-wide security audit events that do not belong to one customer organization
+/// (provider credential rotation/test, KMS maintenance, trust-root changes). Payloads must contain
+/// status/intent only — never credentials, fingerprints derived from credentials, or auth headers.
+model SystemAuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  actorType String
+  actorId   String   @default("")
+  payload   Json     @default("{}")
+  at        DateTime @default(now())
+
+  @@index([at])
+  @@index([action, at])
+}
+
+/// Which non-secret credential revision a supervised provider runtime has loaded. This records only
+/// Secret.version and process identity; it never stores a credential hash/fingerprint or plaintext.
+model ProviderActivation {
+  provider      String   @id
+  secretName    String
+  secretVersion Int
+  runtimeId     String
+  activatedAt   DateTime @default(now())
+
+  @@index([activatedAt])
 }
 
 // ── B3: agent / digital-employee / role-assignment governance ──────────────────────────────

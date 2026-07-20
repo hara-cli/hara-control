@@ -8,6 +8,7 @@ build/
 .env
 .env.*
 !.env.example
+!deploy/nanhara-tech/.env.prod.example
 *.pem
 *.key
 

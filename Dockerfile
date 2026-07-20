@@ -26,6 +26,7 @@ RUN npm run build
 FROM node:22-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
+    HARA_ENV_LOADED=container \
     PORT=4100 \
     HOST=0.0.0.0
 RUN apt-get update \

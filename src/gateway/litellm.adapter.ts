@@ -1,6 +1,16 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { GatewayAdapter, IssuedKey, SpendRecord } from "./gateway-adapter";
+import { GatewayAdapter, GatewayReadiness, IssuedKey, SpendRecord } from "./gateway-adapter";
 import { safeFetch } from "../security/ssrf";
+
+/** LiteLLM accepts compact durations such as `20m`, `30d`, and `600s`. Floor to a whole
+ * second so the data-plane token can never outlive the control-plane request boundary. */
+export function liteLLMKeyDuration(expiresAt: Date, now = new Date()): string {
+  const remainingMs = expiresAt.getTime() - now.getTime();
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+    throw new Error("device-token expiry must be a future date");
+  }
+  return `${Math.max(1, Math.floor(remainingMs / 1_000))}s`;
+}
 
 // Talks to the embedded LiteLLM proxy's admin API. The device token IS a LiteLLM virtual key scoped
 // to a model; the real provider key stays inside LiteLLM. We never store the raw key — revocation is
@@ -14,18 +24,74 @@ export class LiteLLMAdapter implements GatewayAdapter {
   private async call(path: string, body: unknown): Promise<Record<string, unknown>> {
     // safeFetch enforces the SSRF allow-list + private-address guard on the configured upstream
     // (LITELLM_URL) and re-checks every redirect hop. See src/security/ssrf.ts.
-    const res = await safeFetch(`${this.base}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${this.masterKey}` },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`LiteLLM ${path} -> HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    return (await res.json()) as Record<string, unknown>;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await safeFetch(`${this.base}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${this.masterKey}` },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      // Do not reflect an admin endpoint's response body into application logs. A proxy or upstream
+      // error can include credential-bearing request fragments.
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => undefined);
+        throw new Error(`LiteLLM ${path} -> HTTP ${res.status}`);
+      }
+      return (await res.json()) as Record<string, unknown>;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  async issueKey({ model, alias, metadata }: { model: string; alias: string; metadata?: Record<string, unknown> }): Promise<IssuedKey> {
-    const j = await this.call("/key/generate", { models: model ? [model] : [], key_alias: alias, metadata: metadata ?? {} });
-    return { key: String(j.key), keyId: alias };
+  async issueKey({
+    model,
+    alias,
+    expiresAt,
+    metadata,
+  }: {
+    model: string;
+    alias: string;
+    expiresAt: Date;
+    metadata?: Record<string, unknown>;
+  }): Promise<IssuedKey> {
+    const startedAt = new Date();
+    let j: Record<string, unknown>;
+    try {
+      j = await this.call("/key/generate", {
+        models: model ? [model] : [],
+        key_alias: alias,
+        duration: liteLLMKeyDuration(expiresAt, startedAt),
+        metadata: metadata ?? {},
+      });
+    } catch (error) {
+      // A request can cross the gateway boundary before a timeout/malformed response is observed.
+      // The alias belongs to this new device, so a compensating delete is safe and prevents orphans.
+      try {
+        await this.revokeKey(alias);
+      } catch (cleanupError) {
+        this.log.error(`failed to clean up uncertain LiteLLM key issue for alias ${alias}: ${(cleanupError as Error).message}`);
+      }
+      throw error;
+    }
+    const key = typeof j.key === "string" ? j.key : "";
+    const gatewayExpiry = new Date(typeof j.expires === "string" ? j.expires : "");
+    const expiryIsValid =
+      Number.isFinite(gatewayExpiry.getTime()) &&
+      gatewayExpiry.getTime() > startedAt.getTime() &&
+      gatewayExpiry.getTime() <= expiresAt.getTime() + 5_000;
+    if (!key || !expiryIsValid) {
+      // The key may already exist even if LiteLLM returned a malformed lifecycle response.
+      // Revoke by our non-secret alias before failing closed.
+      try {
+        await this.revokeKey(alias);
+      } catch (error) {
+        this.log.error(`failed to clean up malformed LiteLLM key response for alias ${alias}: ${(error as Error).message}`);
+      }
+      throw new Error("LiteLLM returned an invalid expiring-key response");
+    }
+    return { key, keyId: alias, expiresAt: gatewayExpiry };
   }
 
   async revokeKey(keyId: string): Promise<void> {
@@ -43,6 +109,25 @@ export class LiteLLMAdapter implements GatewayAdapter {
     } catch (e) {
       this.log.warn(`spend lookup failed: ${(e as Error).message}`);
       return keyIds.map((keyId) => ({ keyId, spend: 0 }));
+    }
+  }
+
+  async readiness(): Promise<GatewayReadiness> {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5_000);
+      try {
+        const res = await safeFetch(`${this.base}/health/liveliness`, {
+          method: "GET",
+          headers: this.masterKey ? { authorization: `Bearer ${this.masterKey}` } : {},
+          signal: controller.signal,
+        });
+        return { ok: res.ok };
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      return { ok: false };
     }
   }
 }

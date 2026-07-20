@@ -12,8 +12,7 @@ After=network.target postgresql.service
 Type=simple
 User=hara
 WorkingDirectory=/opt/hara-control
-EnvironmentFile=/opt/hara-control/.env
-ExecStart=/usr/bin/node /opt/hara-control/dist/main.js
+ExecStart=/usr/bin/node /opt/hara-control/scripts/with-production-env.mjs /opt/hara-control/.env -- /usr/bin/node /opt/hara-control/dist/main.js
 Restart=always
 RestartSec=3
 # hardening

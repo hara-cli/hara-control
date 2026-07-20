@@ -19,7 +19,9 @@ BASE="$APP_DIR/.litellm-venvs"
 REQUIREMENTS_SHA="$(
   "$PYTHON_BIN" -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$REQUIREMENTS"
 )"
-TARGET="$BASE/$VERSION-$REQUIREMENTS_SHA"
+LAYOUT_VERSION="v2"
+TARGET="$BASE/$LAYOUT_VERSION-$VERSION-$REQUIREMENTS_SHA"
+COMPLETE="$TARGET/.hara-runtime-complete"
 CURRENT="$APP_DIR/.litellm-venv"
 mkdir -p "$BASE"
 chmod 700 "$BASE"
@@ -29,49 +31,64 @@ if [ -e "$CURRENT" ] && [ ! -L "$CURRENT" ]; then
   exit 1
 fi
 
-if [ -x "$TARGET/bin/python3" ]; then
-  installed="$("$TARGET/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("litellm"))')"
-  installed_prisma="$("$TARGET/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("prisma"))')"
+verify_runtime() {
+  runtime="$1"
+  installed="$("$runtime/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("litellm"))')"
+  installed_prisma="$("$runtime/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("prisma"))')"
   [ "$installed" = "$VERSION" ] && [ "$installed_prisma" = "$PRISMA_VERSION" ] || {
-    echo "✗ existing managed LiteLLM environment has unexpected dependency versions"
+    echo "✗ managed LiteLLM environment has unexpected dependency versions"
+    return 1
+  }
+  "$runtime/bin/python3" -c '
+import pathlib
+import litellm
+import prisma
+schema = pathlib.Path(litellm.__file__).parent / "proxy" / "schema.prisma"
+if not schema.is_file():
+    raise SystemExit("LiteLLM proxy schema.prisma is missing")
+'
+  [ -x "$runtime/bin/litellm" ] || {
+    echo "✗ managed LiteLLM console entrypoint is missing or not executable"
+    return 1
+  }
+  expected_shebang="#!$TARGET/bin/python3"
+  actual_shebang="$(sed -n '1p' "$runtime/bin/litellm")"
+  [ "$actual_shebang" = "$expected_shebang" ] || {
+    echo "✗ managed LiteLLM console entrypoint targets a relocated Python environment"
+    return 1
+  }
+}
+
+if [ -e "$TARGET" ]; then
+  [ -d "$TARGET" ] && [ ! -L "$TARGET" ] && [ -f "$COMPLETE" ] && [ ! -L "$COMPLETE" ] || {
+    echo "✗ existing managed LiteLLM environment is incomplete or unsafe"
     exit 1
   }
+  [ "$(cat "$COMPLETE")" = "$REQUIREMENTS_SHA" ] || {
+    echo "✗ existing managed LiteLLM environment has an unexpected completion marker"
+    exit 1
+  }
+  verify_runtime "$TARGET"
 else
-  staging="$(mktemp -d "$BASE/.staging.XXXXXX")"
-  cleanup() { rm -rf -- "$staging"; }
+  mkdir "$TARGET"
+  chmod 700 "$TARGET"
+  cleanup() { rm -rf -- "$TARGET"; }
   trap cleanup EXIT
-  "$PYTHON_BIN" -m venv "$staging"
-  "$staging/bin/python3" -m pip install --disable-pip-version-check --no-input -r "$REQUIREMENTS"
-  installed="$("$staging/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("litellm"))')"
-  installed_prisma="$("$staging/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("prisma"))')"
+  "$PYTHON_BIN" -m venv "$TARGET"
+  "$TARGET/bin/python3" -m pip install --disable-pip-version-check --no-input -r "$REQUIREMENTS"
+  installed="$("$TARGET/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("litellm"))')"
+  installed_prisma="$("$TARGET/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("prisma"))')"
   [ "$installed" = "$VERSION" ] || { echo "✗ installed LiteLLM $installed, expected $VERSION"; exit 1; }
   [ "$installed_prisma" = "$PRISMA_VERSION" ] || {
     echo "✗ installed Prisma Python $installed_prisma, expected $PRISMA_VERSION"
     exit 1
   }
-  "$staging/bin/python3" -c '
-import pathlib
-import litellm
-import prisma
-schema = pathlib.Path(litellm.__file__).parent / "proxy" / "schema.prisma"
-if not schema.is_file():
-    raise SystemExit("LiteLLM proxy schema.prisma is missing")
-'
-  mv "$staging" "$TARGET"
+  verify_runtime "$TARGET"
+  printf '%s\n' "$REQUIREMENTS_SHA" > "$COMPLETE"
+  chmod 600 "$COMPLETE"
   trap - EXIT
 fi
 
 ln -sfn "$TARGET" "$CURRENT"
-resolved="$("$CURRENT/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("litellm"))')"
-resolved_prisma="$("$CURRENT/bin/python3" -c 'import importlib.metadata; print(importlib.metadata.version("prisma"))')"
-[ "$resolved" = "$VERSION" ] || { echo "✗ active LiteLLM version mismatch"; exit 1; }
-[ "$resolved_prisma" = "$PRISMA_VERSION" ] || { echo "✗ active Prisma Python version mismatch"; exit 1; }
-"$CURRENT/bin/python3" -c '
-import pathlib
-import litellm
-import prisma
-schema = pathlib.Path(litellm.__file__).parent / "proxy" / "schema.prisma"
-if not schema.is_file():
-    raise SystemExit("LiteLLM proxy schema.prisma is missing")
-'
+verify_runtime "$CURRENT"
 echo "✓ LiteLLM runtime ready (pinned LiteLLM $VERSION + Prisma Python $PRISMA_VERSION)"

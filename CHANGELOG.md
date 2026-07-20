@@ -10,6 +10,8 @@ All notable changes to hara-control are documented in this file.
   before production services may switch.
 - Fingerprint managed LiteLLM virtual environments by the full production requirements file so a
   dependency-only correction cannot silently reuse an incomplete environment.
+- Recognize PM2's ESM import execution path in the checked environment wrapper; the wrapper now
+  launches its supervised child instead of appearing online with no data-plane process.
 
 ## 0.1.2 - 2026-07-13
 

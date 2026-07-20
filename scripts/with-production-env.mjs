@@ -9,7 +9,7 @@ import {
   readFileSync,
 } from "node:fs";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 function fail(message) {
   process.stderr.write(`production env preflight failed: ${message}\n`);
@@ -194,7 +194,25 @@ export function validateProductionEnv(env, envPath) {
   if (!envPath) fail("env path missing");
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+const thisScriptPath = resolve(fileURLToPath(import.meta.url));
+
+/** PM2 imports ESM applications from ProcessContainerFork.js instead of making them argv[1].
+ * Accept that exact, manager-provided executable path only when a numeric PM2 id is also present. */
+export function isMainInvocation(argv1, env = process.env) {
+  const direct =
+    typeof argv1 === "string"
+    && import.meta.url === pathToFileURL(resolve(argv1)).href;
+  if (direct) return true;
+  const pmExecPath = env?.pm_exec_path;
+  const pmId = String(env?.pm_id ?? "");
+  return (
+    typeof pmExecPath === "string"
+    && /^\d+$/.test(pmId)
+    && resolve(pmExecPath) === thisScriptPath
+  );
+}
+
+if (isMainInvocation(process.argv[1], process.env)) {
   const argv = process.argv.slice(2);
   const separator = argv.indexOf("--");
   if (argv.length < 3 || separator !== 1 || separator === argv.length - 1) {

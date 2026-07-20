@@ -53,6 +53,31 @@ test("production wrapper parses values as data and launches the command with che
   });
 });
 
+test("production wrapper recognizes PM2's ESM import execution without trusting arbitrary imports", async () => {
+  const { isMainInvocation } = await import("../scripts/with-production-env.mjs");
+  assert.equal(isMainInvocation(script, {}), true);
+  assert.equal(
+    isMainInvocation("/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js", {
+      pm_exec_path: script,
+      pm_id: "20",
+    }),
+    true,
+  );
+  assert.equal(
+    isMainInvocation("/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js", {
+      pm_exec_path: script,
+    }),
+    false,
+  );
+  assert.equal(
+    isMainInvocation("/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js", {
+      pm_exec_path: resolve("scripts/another-wrapper.mjs"),
+      pm_id: "20",
+    }),
+    false,
+  );
+});
+
 test("production wrapper rejects broad env permissions before reading/launching", () => {
   withTemp((dir) => {
     const envFile = validEnv(dir);

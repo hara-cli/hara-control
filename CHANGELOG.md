@@ -16,6 +16,8 @@ All notable changes to hara-control are documented in this file.
   console entrypoints keep valid absolute shebangs; incomplete runtimes now fail closed.
 - Generate and instantiate the pinned Prisma Python client during runtime assembly, matching
   LiteLLM's official image build instead of discovering missing binaries after PM2 starts.
+- Run Prisma client generation from an isolated temporary directory with a minimal environment so
+  it cannot auto-load Hara's production `.env` while assembling the data-plane runtime.
 
 ## 0.1.2 - 2026-07-13
 

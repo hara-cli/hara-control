@@ -65,6 +65,8 @@ test("LiteLLM runtime pins its database client and never reuses a drifted virtua
   assert.match(liteLlmInstaller, /import prisma/);
   assert.match(liteLlmInstaller, /from prisma import Prisma/);
   assert.match(liteLlmInstaller, /"\$TARGET\/bin\/prisma" generate --schema="\$schema"/);
+  assert.match(liteLlmInstaller, /mktemp -d "\/tmp\/hara-litellm-prisma\.XXXXXX"/);
+  assert.match(liteLlmInstaller, /env -i/);
   assert.match(liteLlmInstaller, /DATABASE_URL="postgresql:\/\/unused:unused@127\.0\.0\.1:1\/unused"/);
   assert.match(liteLlmInstaller, /schema\.is_file\(\)/);
 });

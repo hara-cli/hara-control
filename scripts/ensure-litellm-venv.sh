@@ -91,9 +91,12 @@ import litellm
 print(pathlib.Path(litellm.__file__).parent / "proxy" / "schema.prisma")
 ')"
   (
-    cd "$TARGET"
-    env \
-      PATH="$TARGET/bin:$PATH" \
+    generator_workdir="$(mktemp -d "/tmp/hara-litellm-prisma.XXXXXX")"
+    trap 'rm -rf -- "$generator_workdir"' EXIT
+    cd "$generator_workdir"
+    env -i \
+      HOME="${HOME:-/tmp}" \
+      PATH="$TARGET/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       DATABASE_URL="postgresql://unused:unused@127.0.0.1:1/unused" \
       "$TARGET/bin/prisma" generate --schema="$schema"
   )

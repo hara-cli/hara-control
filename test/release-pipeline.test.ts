@@ -13,6 +13,7 @@ test("tag release deploys only after the verified multi-arch image through a pro
   assert.match(workflow, /deploy_production:\n\s+needs: image/);
   assert.match(workflow, /environment:\n\s+name: hara-control-production/);
   assert.match(workflow, /startsWith\(github\.ref, 'refs\/tags\/v'\)/);
+  assert.match(workflow, /HARA_CONTROL_AUTO_DEPLOY_ENABLED == '1'/);
   assert.match(workflow, /StrictHostKeyChecking=yes/);
   assert.match(workflow, /deploy \$GITHUB_REF_NAME \$GITHUB_SHA/);
   assert.doesNotMatch(workflow, /ssh-keyscan/);

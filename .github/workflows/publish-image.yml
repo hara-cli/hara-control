@@ -84,7 +84,12 @@ jobs:
 
   deploy_production:
     needs: image
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Intentionally opt-in until the dedicated forced-command key is installed on production.
+    # Leaving the variable unset keeps image publishing healthy instead of attempting an
+    # underconfigured SSH deployment.
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') &&
+      vars.HARA_CONTROL_AUTO_DEPLOY_ENABLED == '1'
     runs-on: ubuntu-latest
     environment:
       name: hara-control-production

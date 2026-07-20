@@ -7,7 +7,9 @@
 set -euo pipefail
 APP_DIR="${APP_DIR:-$(pwd)}"
 PM2_NAME="${PM2_NAME:-hara-control}"
-LITELLM_PM2_NAME="${LITELLM_PM2_NAME:-litellm}"
+# Keep the historical production identity so an upgrade replaces the existing provider-bearing
+# process instead of creating a second unmanaged instance on the same port.
+LITELLM_PM2_NAME="${LITELLM_PM2_NAME:-hara-litellm}"
 cd "$APP_DIR"
 [ -f .env ] || { echo "✗ $APP_DIR/.env missing — set DATABASE_URL (RDS) + GATEWAY_ADAPTER=mock"; exit 1; }
 command -v node >/dev/null || { echo "✗ node not found (need >=20)"; exit 1; }

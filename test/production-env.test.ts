@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const script = resolve("scripts/with-production-env.mjs");
+const deployScript = resolve("deploy/nanhara-tech/deploy-ai-rds.sh");
 
 function withTemp(run: (dir: string) => void) {
   const dir = mkdtempSync(join(tmpdir(), "hara-control-env-"));
@@ -91,4 +92,18 @@ test("production wrapper rejects a LiteLLM database URL that can touch the contr
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /LITELLM_DATABASE_URL.*schema=litellm/);
   });
+});
+
+test("production deploy replaces the canonical existing LiteLLM PM2 process", () => {
+  const source = readFileSync(deployScript, "utf8");
+  assert.match(
+    source,
+    /LITELLM_PM2_NAME="\$\{LITELLM_PM2_NAME:-hara-litellm\}"/,
+    "the default must match the existing production process identity",
+  );
+  assert.match(
+    source,
+    /pm2_clean delete "\$LITELLM_PM2_NAME"/,
+    "the old provider-bearing definition must be deleted before replacement",
+  );
 });

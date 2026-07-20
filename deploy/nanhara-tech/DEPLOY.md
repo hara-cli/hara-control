@@ -71,6 +71,8 @@ Smoke: `curl -fsS http://127.0.0.1:4100/health/ready` on the host must return 20
 promotion. `/health/live` only proves the Nest process exists; it is not a readiness substitute.
 The deploy also fails if PM2 serializes protected `.env` values instead of keeping only the env-loader
 wrapper and owner-only file path in its process definition.
+The canonical production data-plane process is `hara-litellm`; do not rename it during an upgrade,
+because exact replacement is part of removing the previous runtime environment.
 
 ## 5. Issue a token to your laptop
 Admin API is localhost-locked → reach the console over an SSH tunnel. Bootstrap a real SUPERADMIN,

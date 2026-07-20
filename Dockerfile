@@ -39,8 +39,9 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/scripts/recover-known-failed-migration.mjs ./scripts/recover-known-failed-migration.mjs
 COPY package.json ./
 EXPOSE 4100
 # On boot: apply pending migrations (idempotent), then start. Override CMD to skip auto-migrate if you run
 # migrations out-of-band. DATABASE_URL / HARA_CONTROL_ADMIN_KEY etc. come from the environment.
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
+CMD ["sh", "-c", "npm run prisma:deploy && node dist/main.js"]

@@ -49,10 +49,10 @@ echo "▶ install + build (npm via .npmrc mirror if present)"
 npm ci --include=dev
 npm run build
 
-echo "▶ migrate → RDS (prisma migrate deploy)"
+echo "▶ migrate → RDS (known-failure guard + prisma migrate deploy)"
 # If this fails on the vector extension, enable pgvector once on the RDS, then re-run:
 #   psql "$DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS vector;'   (needs a privileged RDS account)
-npx prisma migrate deploy
+npm run prisma:deploy
 if [ "${GATEWAY_ADAPTER:-mock}" = "litellm" ]; then
   echo "▶ bootstrap/verify encrypted DeepSeek source of truth"
   node dist/ops/provider-secret.js bootstrap-deepseek-env --scrub-env-file "$APP_DIR/.env"

@@ -1,6 +1,6 @@
 {
   "name": "hara-control",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Apache-2.0 self-hosted control plane for the Hara fleet.",
   "license": "Apache-2.0",
@@ -11,6 +11,7 @@
     "start:dev": "nest start --watch",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "node scripts/recover-known-failed-migration.mjs && prisma migrate deploy",
     "admin": "tsx cli/admin.ts",
     "provider-secret": "node dist/ops/provider-secret.js",
     "test": "node --test --import tsx test/*.test.ts"

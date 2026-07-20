@@ -14,11 +14,9 @@ CREATE TABLE "SystemAuditLog" (
 CREATE INDEX "SystemAuditLog_at_idx" ON "SystemAuditLog"("at");
 CREATE INDEX "SystemAuditLog_action_at_idx" ON "SystemAuditLog"("action", "at");
 
--- PostgreSQL considers NULLs distinct in a compound unique constraint. Without this partial
--- index, concurrent/global credential writes can create multiple rows for the same logical secret.
-CREATE UNIQUE INDEX "Secret_global_name_key"
-ON "Secret"("name")
-WHERE "orgId" IS NULL;
+-- The global-secret partial unique index is owned by
+-- 20260626000000_secrets_store. Do not recreate it here: PostgreSQL aborts the whole transaction
+-- when an already-applied installation sees the duplicate index name.
 
 -- A credential revision is metadata only (not derived from the credential). Provider runtimes use
 -- it to prove which encrypted revision they loaded without storing or exposing a fingerprint.

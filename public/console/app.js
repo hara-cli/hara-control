@@ -521,6 +521,7 @@
               <th>${escapeHtml(I18N.t("fleet.col.os"))}</th>
               <th>${escapeHtml(I18N.t("fleet.col.model"))}</th>
               <th class="num">${escapeHtml(I18N.t("fleet.col.spend"))}</th>
+              <th>${escapeHtml(I18N.t("fleet.col.policy"))}</th>
               <th>${escapeHtml(I18N.t("fleet.col.id"))}</th>
               <th></th>
             </tr>
@@ -533,6 +534,13 @@
                 <td>${escapeHtml(d.os || "—")}</td>
                 <td>${escapeHtml(d.model || "—")}</td>
                 <td class="num">$${Number(d.spend ?? 0).toFixed(2)}</td>
+                <td>
+                  <div>${escapeHtml(d.expires_at
+                    ? I18N.t("fleet.policy.expires", { date: formatDateTime(d.expires_at) })
+                    : I18N.t("fleet.policy.no_expiry"))}</div>
+                  <div class="small">${escapeHtml(formatBudgetSummary(d.budget_limits))}</div>
+                  <div class="small">${escapeHtml(formatRateSummary(d.rpm_limit, d.tpm_limit))}</div>
+                </td>
                 <td>
                   <span class="id-cell" title="${escapeHtml(d.device_id)}">
                     <span>${escapeHtml(truncateMid(d.device_id))}</span>
@@ -579,23 +587,88 @@
   // ╚═══════════════════════════════════════════════════════════════════╝
   let lastEnrollResult = null;
 
+  function readOptionalPositiveNumber(id, { integer = false, max }) {
+    const raw = $(id).value.trim();
+    if (!raw) return undefined;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0 || value > max || (integer && !Number.isSafeInteger(value))) {
+      throw new Error(I18N.t("enroll.policy.invalid_number"));
+    }
+    return value;
+  }
+
+  function formatBudgetSummary(limits) {
+    if (!Array.isArray(limits) || !limits.length) return I18N.t("enroll.policy.unlimited");
+    return limits.map((entry) => {
+      const label = I18N.t(`enroll.policy.window.${entry.window}`);
+      return `${label} · $${Number(entry.maxUsd ?? 0).toFixed(2)}`;
+    }).join(" / ");
+  }
+
+  function formatRateSummary(rpmLimit, tpmLimit) {
+    const rates = [];
+    if (rpmLimit) rates.push(`${rpmLimit} RPM`);
+    if (tpmLimit) rates.push(`${tpmLimit} TPM`);
+    return rates.length
+      ? I18N.t("fleet.policy.rates", { rates: rates.join(" · ") })
+      : I18N.t("fleet.policy.rates_unlimited");
+  }
+
+  function formatAccessPolicy(policy) {
+    if (!policy) return "—";
+    const days = Number(policy.tokenTtlMinutes ?? 0) / (24 * 60);
+    const lines = [
+      I18N.t("enroll.result.policy.validity", { days: Number.isInteger(days) ? days : days.toFixed(2) }),
+      I18N.t("enroll.result.policy.budgets", { budgets: formatBudgetSummary(policy.budgetLimits) }),
+    ];
+    const rates = [];
+    if (policy.rpmLimit) rates.push(`${policy.rpmLimit} RPM`);
+    if (policy.tpmLimit) rates.push(`${policy.tpmLimit} TPM`);
+    if (rates.length) lines.push(I18N.t("enroll.result.policy.rates", { rates: rates.join(" · ") }));
+    return lines.join("\n");
+  }
+
   $("#ec-create").addEventListener("click", async () => {
     const orgId = $("#ec-orgid").value.trim();
     const model = $("#ec-model").value.trim();
     const gateway = $("#ec-gateway").value.trim().replace(/\/$/, "");
     if (!orgId) { toast(I18N.t("err.orgid_required"), "err"); return; }
     try {
-      const r = await api("POST", "/admin/enroll-codes", { orgId, model: model || undefined });
-      lastEnrollResult = { code: r.code, gateway, expiresAt: r.expiresAt };
+      const tokenDays = readOptionalPositiveNumber("#ec-token-days", { integer: true, max: 365 }) ?? 7;
+      const budgetLimits = [
+        ["5h", "#ec-budget-5h"],
+        ["week", "#ec-budget-week"],
+        ["month", "#ec-budget-month"],
+      ].flatMap(([window, selector]) => {
+        const maxUsd = readOptionalPositiveNumber(selector, { max: 1_000_000 });
+        return maxUsd == null ? [] : [{ window, maxUsd }];
+      });
+      const rpmLimit = readOptionalPositiveNumber("#ec-rpm", { integer: true, max: 1_000_000 });
+      const tpmLimit = readOptionalPositiveNumber("#ec-tpm", { integer: true, max: 1_000_000_000 });
+      const r = await api("POST", "/admin/enroll-codes", {
+        orgId,
+        model: model || undefined,
+        tokenTtlMinutes: tokenDays * 24 * 60,
+        budgetLimits,
+        rpmLimit,
+        tpmLimit,
+      });
+      lastEnrollResult = {
+        code: r.code,
+        gateway,
+        expiresAt: r.expiresAt,
+        accessPolicy: r.accessPolicy,
+      };
       paintEnrollResult(lastEnrollResult);
       toast(I18N.t("ok.enroll_minted"), "ok");
     } catch (e) { toast(e.message, "err"); }
   });
 
-  function paintEnrollResult({ code, gateway, expiresAt }) {
+  function paintEnrollResult({ code, gateway, expiresAt, accessPolicy }) {
     $("#ec-code-text").textContent = code;
     $("#ec-cmd-text").textContent = `hara enroll ${gateway} --code ${code}`;
     $("#ec-expires").textContent = formatDateTime(expiresAt);
+    $("#ec-policy-result").textContent = formatAccessPolicy(accessPolicy);
     $("#ec-result").classList.remove("hidden");
   }
 

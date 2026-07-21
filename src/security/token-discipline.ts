@@ -27,8 +27,12 @@ export function deviceTokenTtlMinutes(env: NodeJS.ProcessEnv = process.env): num
 }
 
 /** Compute an expiry Date for a freshly-issued token. */
-export function deviceTokenExpiry(now = new Date(), env: NodeJS.ProcessEnv = process.env): Date {
-  return new Date(now.getTime() + deviceTokenTtlMinutes(env) * 60_000);
+export function deviceTokenExpiry(
+  now = new Date(),
+  env: NodeJS.ProcessEnv = process.env,
+  ttlMinutes = deviceTokenTtlMinutes(env),
+): Date {
+  return new Date(now.getTime() + ttlMinutes * 60_000);
 }
 
 /**

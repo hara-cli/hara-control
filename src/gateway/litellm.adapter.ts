@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { GatewayAdapter, GatewayReadiness, IssuedKey, SpendRecord } from "./gateway-adapter";
 import { safeFetch } from "../security/ssrf";
+import { GatewayKeyLimits } from "./key-policy";
 
 /** LiteLLM accepts compact durations such as `20m`, `30d`, and `600s`. Floor to a whole
  * second so the data-plane token can never outlive the control-plane request boundary. */
@@ -10,6 +11,59 @@ export function liteLLMKeyDuration(expiresAt: Date, now = new Date()): string {
     throw new Error("device-token expiry must be a future date");
   }
   return `${Math.max(1, Math.floor(remainingMs / 1_000))}s`;
+}
+
+export function liteLLMKeyIssuePayload(opts: {
+  model: string;
+  alias: string;
+  expiresAt: Date;
+  metadata?: Record<string, unknown>;
+  limits?: GatewayKeyLimits;
+}, now = new Date()): Record<string, unknown> {
+  const limits = opts.limits;
+  return {
+    models: opts.model ? [opts.model] : [],
+    key_alias: opts.alias,
+    duration: liteLLMKeyDuration(opts.expiresAt, now),
+    metadata: opts.metadata ?? {},
+    ...(limits?.budgetLimits.length
+      ? {
+          budget_limits: limits.budgetLimits.map((entry) => ({
+            budget_duration: entry.budgetDuration,
+            max_budget: entry.maxBudgetUsd,
+          })),
+        }
+      : {}),
+    ...(limits?.rpmLimit == null ? {} : { rpm_limit: limits.rpmLimit }),
+    ...(limits?.tpmLimit == null ? {} : { tpm_limit: limits.tpmLimit }),
+  };
+}
+
+export function liteLLMResponseConfirmsLimits(
+  response: Record<string, unknown>,
+  limits?: GatewayKeyLimits,
+): boolean {
+  if (!limits) return true;
+  if (limits.rpmLimit != null && Number(response.rpm_limit) !== limits.rpmLimit) return false;
+  if (limits.tpmLimit != null && Number(response.tpm_limit) !== limits.tpmLimit) return false;
+  if (!limits.budgetLimits.length) return true;
+  if (!Array.isArray(response.budget_limits) || response.budget_limits.length !== limits.budgetLimits.length) {
+    return false;
+  }
+  const actual = response.budget_limits
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const row = entry as Record<string, unknown>;
+      const budgetDuration = typeof row.budget_duration === "string" ? row.budget_duration : "";
+      const maxBudgetUsd = Number(row.max_budget);
+      return Number.isFinite(maxBudgetUsd) ? `${budgetDuration}:${maxBudgetUsd}` : null;
+    })
+    .filter((entry): entry is string => entry !== null)
+    .sort();
+  const expected = limits.budgetLimits
+    .map((entry) => `${entry.budgetDuration}:${entry.maxBudgetUsd}`)
+    .sort();
+  return actual.length === expected.length && actual.every((entry, index) => entry === expected[index]);
 }
 
 export async function liteLLMKeyManagementReady(
@@ -83,21 +137,21 @@ export class LiteLLMAdapter implements GatewayAdapter {
     alias,
     expiresAt,
     metadata,
+    limits,
   }: {
     model: string;
     alias: string;
     expiresAt: Date;
     metadata?: Record<string, unknown>;
+    limits?: GatewayKeyLimits;
   }): Promise<IssuedKey> {
     const startedAt = new Date();
     let j: Record<string, unknown>;
     try {
-      j = await this.call("/key/generate", {
-        models: model ? [model] : [],
-        key_alias: alias,
-        duration: liteLLMKeyDuration(expiresAt, startedAt),
-        metadata: metadata ?? {},
-      });
+      j = await this.call(
+        "/key/generate",
+        liteLLMKeyIssuePayload({ model, alias, expiresAt, metadata, limits }, startedAt),
+      );
     } catch (error) {
       // A request can cross the gateway boundary before a timeout/malformed response is observed.
       // The alias belongs to this new device, so a compensating delete is safe and prevents orphans.
@@ -114,7 +168,7 @@ export class LiteLLMAdapter implements GatewayAdapter {
       Number.isFinite(gatewayExpiry.getTime()) &&
       gatewayExpiry.getTime() > startedAt.getTime() &&
       gatewayExpiry.getTime() <= expiresAt.getTime() + 5_000;
-    if (!key || !expiryIsValid) {
+    if (!key || !expiryIsValid || !liteLLMResponseConfirmsLimits(j, limits)) {
       // The key may already exist even if LiteLLM returned a malformed lifecycle response.
       // Revoke by our non-secret alias before failing closed.
       try {
@@ -122,7 +176,7 @@ export class LiteLLMAdapter implements GatewayAdapter {
       } catch (error) {
         this.log.error(`failed to clean up malformed LiteLLM key response for alias ${alias}: ${(error as Error).message}`);
       }
-      throw new Error("LiteLLM returned an invalid expiring-key response");
+      throw new Error("LiteLLM returned an invalid or unenforced key-policy response");
     }
     return { key, keyId: alias, expiresAt: gatewayExpiry };
   }

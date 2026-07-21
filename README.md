@@ -15,7 +15,7 @@
 
 - **Device enrollment** — `hara enroll <gateway>` pairs a machine, issues it a scoped device token
   (the real upstream provider key **never** lands on the device).
-- **Token lifecycle** — issue / scope / budget / revoke per device, per user.
+- **Token lifecycle** — issue / scope / expiry / rolling budget / rate limit / revoke per device, per user.
 - **Fleet view** — which machines are online, who, version, today's tokens + cost, which models.
 - **Governance** — model allow-lists, per-seat budgets, data-residency policy, org RBAC, audit log.
 - **Multi-tenant** (later) — many orgs on one managed deployment.
@@ -38,8 +38,10 @@ v1 hardening status is:
   `src/security/ssrf.ts`, wired into the LiteLLM + embeddings calls.
 - ✅ **Tamper-evident audit** — per-org hash-chained `AuditLog` + `verify()` (`GET /admin/audit/verify`).
   Signed checkpoints are the deferred enterprise extension.
-- ✅ **Token discipline** — short TTL (`expiresAt`, default 7d) + server-side revocation check on every
-  validation + a per-device/per-tenant spend-cap enforcement hook. `src/security/token-discipline.ts`.
+- ✅ **Token discipline** — short TTL (`expiresAt`, default 7d), server-side revocation checks, and
+  LiteLLM-enforced 5-hour / 7-day / 30-day rolling USD budgets plus optional RPM/TPM limits. The
+  gateway must confirm every requested limit before enrollment succeeds; otherwise the uncertain key
+  is revoked and the exchange fails closed. See [`docs/internal-key-policy.md`](docs/internal-key-policy.md).
 - 🟡 **Multi-tenant isolation** — Postgres RLS policies exist on all org-scoped tables; finishing it (a
   non-owner app role + `FORCE` + `WITH CHECK`) is documented in `HARDENING.md §A`.
 - ✅ **At-rest secrets** via AES-256-GCM envelope encryption / KMS. DeepSeek credential management
@@ -68,6 +70,10 @@ Config knobs for the above are in [`.env.example`](./.env.example).
 
 - **Two token layers**: device↔gateway = hara-issued token; gateway↔upstream = real provider key
   (only at the gateway, in a vault/env). **Real key never on the device** = core invariant.
+- **Two separate admin concerns**: an internal device key policy controls colleague access, expiry,
+  budgets, and rates; an upstream connection pool controls encrypted provider credentials and routing.
+  Internal limits are implemented independently so issuing a colleague key never exposes or copies an
+  upstream provider key.
 - **Shared Postgres, isolated schemas**: hara-control uses `schema=public`; LiteLLM uses
   `schema=litellm`. This keeps migrations/table names from colliding while still permitting an
   explicitly-reviewed usage aggregation path without cross-database ETL.
@@ -117,7 +123,7 @@ services:
       retries: 10
 
   control:
-    image: ghcr.io/hara-cli/hara-control:0.1.8   # pin releases in production
+    image: ghcr.io/hara-cli/hara-control:0.1.9   # pin releases in production
     depends_on:
       postgres:
         condition: service_healthy
@@ -161,7 +167,7 @@ docker run -d --name hara-control -p 4100:4100 \
   -e HARA_KMS_KEYFILE=/run/hara-secrets/kms-master.key \
   -v "$PWD/secrets/kms-master.key:/run/hara-secrets/kms-master.key:ro" \
   -e GATEWAY_ADAPTER=mock \
-  ghcr.io/hara-cli/hara-control:0.1.8
+  ghcr.io/hara-cli/hara-control:0.1.9
 ```
 
 Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database>?schema=public`.

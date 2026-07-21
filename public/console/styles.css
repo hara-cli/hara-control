@@ -433,6 +433,102 @@ code, pre, .mono { font-family: var(--font-mono); }
   .grid--2 { grid-template-columns: 1fr 1fr; }
 }
 
+.policy-editor {
+  margin: 18px 0 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--bg);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--coral) 5%, transparent), transparent 52%),
+    var(--bg);
+}
+.policy-editor__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.policy-editor__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.policy-editor__hint {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.quota-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+.quota-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 11.5px;
+}
+.input-unit {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  background: var(--panel-2);
+  color: var(--muted);
+  padding-left: 9px;
+  transition: border-color .12s, background .12s;
+}
+.input-unit:focus-within {
+  border-color: var(--coral);
+  background: var(--panel);
+}
+.input-unit input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 8px 8px 8px 5px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+.input-unit input::placeholder { color: var(--muted); opacity: .7; }
+.policy-editor__advanced {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.policy-editor__advanced summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.policy-rate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.policy-result {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  background: var(--bg);
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-line;
+}
+@media (max-width: 620px) {
+  .policy-editor__head { align-items: flex-start; flex-direction: column; }
+}
+
 /* ── button ────────────────────────────────────────────────────────── */
 .btn {
   background: var(--coral);

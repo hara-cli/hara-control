@@ -1,11 +1,17 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
-import { OrgUnitType } from "@prisma/client";
+import { OrgUnitType, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { OrgTreeService } from "../org/org-tree.service";
 import { GATEWAY_ADAPTER, GatewayAdapter } from "../gateway/gateway-adapter";
 import { randomId } from "../common/crypto";
 import { resolveEnrollmentModel } from "../providers/model-policy";
+import { deviceTokenTtlMinutes } from "../security/token-discipline";
+import {
+  AccessKeyPolicyInput,
+  normalizeAccessKeyPolicy,
+  StoredAccessKeyPolicy,
+} from "../gateway/key-policy";
 
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -45,10 +51,20 @@ export class AdminService {
     return this.orgTree.descendants(orgId);
   }
 
-  async createEnrollCode(orgId: string, model = "", baseUrl?: string, ttlMinutes = 60, personId?: string, now = new Date()) {
+  async createEnrollCode(
+    orgId: string,
+    model = "",
+    baseUrl?: string,
+    ttlMinutes = 60,
+    personId?: string,
+    keyPolicy: AccessKeyPolicyInput = {},
+    now = new Date(),
+  ) {
     let resolvedModel: string;
+    let accessPolicy: StoredAccessKeyPolicy;
     try {
       resolvedModel = resolveEnrollmentModel(model);
+      accessPolicy = normalizeAccessKeyPolicy(keyPolicy, deviceTokenTtlMinutes());
     } catch (error) {
       throw new BadRequestException((error as Error).message);
     }
@@ -60,14 +76,19 @@ export class AdminService {
         baseUrl: baseUrl ?? null,
         personId: personId ?? null,
         expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
+        tokenTtlMinutes: accessPolicy.tokenTtlMinutes,
+        budgetLimits: accessPolicy.budgetLimits as unknown as Prisma.InputJsonValue,
+        rpmLimit: accessPolicy.rpmLimit,
+        tpmLimit: accessPolicy.tpmLimit,
       },
     });
     await this.audit.log(orgId, "enroll_code.create", "admin", "", {
       model: resolvedModel,
       ttlMinutes,
       personId,
+      accessPolicy,
     });
-    return { code: ec.code, expiresAt: ec.expiresAt };
+    return { code: ec.code, expiresAt: ec.expiresAt, accessPolicy };
   }
 
   /** Read-only fleet view: who's online, version, token status, spend (joined from the gateway). */
@@ -77,11 +98,13 @@ export class AdminService {
       include: { tokens: true },
       orderBy: { lastSeenAt: "desc" },
     });
-    const activeKeyIds = devices.flatMap((d) => d.tokens.filter((t) => !t.revokedAt).map((t) => t.gatewayKeyId));
+    const tokenIsActive = (token: (typeof devices)[number]["tokens"][number]) =>
+      !token.revokedAt && (!token.expiresAt || token.expiresAt.getTime() > now.getTime());
+    const activeKeyIds = devices.flatMap((d) => d.tokens.filter(tokenIsActive).map((t) => t.gatewayKeyId));
     const spend = new Map((await this.gateway.listSpend(activeKeyIds)).map((s) => [s.keyId, s.spend]));
 
     return devices.map((d) => {
-      const active = d.tokens.find((t) => !t.revokedAt);
+      const active = d.tokens.find(tokenIsActive);
       return {
         device_id: d.id,
         name: d.name,
@@ -92,6 +115,10 @@ export class AdminService {
         token_active: Boolean(active),
         model: active?.model ?? "",
         spend: active ? spend.get(active.gatewayKeyId) ?? 0 : 0,
+        expires_at: active?.expiresAt ?? null,
+        budget_limits: active?.budgetLimits ?? [],
+        rpm_limit: active?.rpmLimit ?? null,
+        tpm_limit: active?.tpmLimit ?? null,
       };
     });
   }

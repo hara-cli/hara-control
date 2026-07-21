@@ -9,9 +9,32 @@ import type { GatewayAdapter } from "../src/gateway/gateway-adapter";
 import type { PrismaService } from "../src/prisma/prisma.service";
 import type { AuditService } from "../src/audit/audit.service";
 
-type Code = { id: string; orgId: string; code: string; model: string; baseUrl: string | null; expiresAt: Date; usedAt: Date | null };
+type Code = {
+  id: string;
+  orgId: string;
+  code: string;
+  model: string;
+  baseUrl: string | null;
+  expiresAt: Date;
+  usedAt: Date | null;
+  tokenTtlMinutes?: number | null;
+  budgetLimits?: unknown;
+  rpmLimit?: number | null;
+  tpmLimit?: number | null;
+};
 type Dev = { id: string; orgId: string; name: string; os: string; haraVersion: string; lastSeenAt: Date; enrollCodeId: string };
-type Tok = { id: string; deviceId: string; tokenHash: string; gatewayKeyId: string; model: string; expiresAt: Date; revokedAt: Date | null };
+type Tok = {
+  id: string;
+  deviceId: string;
+  tokenHash: string;
+  gatewayKeyId: string;
+  model: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  budgetLimits?: unknown;
+  rpmLimit?: number | null;
+  tpmLimit?: number | null;
+};
 
 function fakePrisma() {
   const db = { codes: new Map<string, Code>(), devices: new Map<string, Dev>(), tokens: [] as Tok[] };
@@ -101,6 +124,61 @@ test("enroll: valid code -> device token; code is single-use", async () => {
   assert.equal(res.expires_at, prisma.db.tokens[0].expiresAt.toISOString(), "client and control plane use the gateway expiry");
 
   await assert.rejects(() => svc.enroll("hara-good", { name: "mac2", os: "darwin", hara_version: "0.68.0" }), /expired|bad/i, "code can't be reused");
+});
+
+test("enroll: applies and persists the admin-issued lifetime, rolling budgets, RPM, and TPM", async () => {
+  const prisma = fakePrisma();
+  const now = new Date("2026-07-22T00:00:00Z");
+  prisma.db.codes.set("hara-limited", {
+    id: "c-limited",
+    orgId: "o1",
+    code: "hara-limited",
+    model: "deepseek-chat",
+    baseUrl: null,
+    expiresAt: new Date("2026-07-22T01:00:00Z"),
+    usedAt: null,
+    tokenTtlMinutes: 2 * 24 * 60,
+    budgetLimits: [
+      { window: "5h", maxUsd: 2, budgetDuration: "5h" },
+      { window: "week", maxUsd: 20, budgetDuration: "7d" },
+      { window: "month", maxUsd: 60, budgetDuration: "30d" },
+    ],
+    rpmLimit: 30,
+    tpmLimit: 120_000,
+  });
+  let issuedOpts: Parameters<GatewayAdapter["issueKey"]>[0] | null = null;
+  const delegate = new MockGatewayAdapter();
+  const gateway = {
+    issueKey: async (opts: Parameters<GatewayAdapter["issueKey"]>[0]) => {
+      issuedOpts = opts;
+      return delegate.issueKey(opts);
+    },
+    revokeKey: (keyId: string) => delegate.revokeKey(keyId),
+    listSpend: (keyIds: string[]) => delegate.listSpend(keyIds),
+    readiness: () => delegate.readiness(),
+  } satisfies GatewayAdapter;
+
+  const result = await svcFor(prisma, gateway).enroll(
+    "hara-limited",
+    { name: "limited-mac", os: "darwin", hara_version: "0.132.4" },
+    now,
+  );
+
+  assert.equal(issuedOpts!.expiresAt.toISOString(), "2026-07-24T00:00:00.000Z");
+  assert.deepEqual(issuedOpts!.limits, {
+    budgetLimits: [
+      { budgetDuration: "5h", maxBudgetUsd: 2 },
+      { budgetDuration: "7d", maxBudgetUsd: 20 },
+      { budgetDuration: "30d", maxBudgetUsd: 60 },
+    ],
+    rpmLimit: 30,
+    tpmLimit: 120_000,
+  });
+  assert.equal(result.expires_at, "2026-07-24T00:00:00.000Z");
+  assert.equal(result.access_policy.tokenTtlMinutes, 2 * 24 * 60);
+  assert.equal(prisma.db.tokens[0].rpmLimit, 30);
+  assert.equal(prisma.db.tokens[0].tpmLimit, 120_000);
+  assert.deepEqual(prisma.db.tokens[0].budgetLimits, result.access_policy.budgetLimits);
 });
 
 test("enroll: expired or unknown code is rejected", async () => {

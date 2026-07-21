@@ -3,6 +3,8 @@
 // LiteLLM for Bifrost / a direct provider / a custom core later means writing one new adapter,
 // never touching the control plane or clients.
 
+import type { GatewayKeyLimits } from "./key-policy";
+
 export interface IssuedKey {
   /** the gateway virtual key — returned to the device as its device token, never stored raw */
   key: string;
@@ -22,7 +24,13 @@ export interface GatewayReadiness {
 }
 
 export interface GatewayAdapter {
-  issueKey(opts: { model: string; alias: string; expiresAt: Date; metadata?: Record<string, unknown> }): Promise<IssuedKey>;
+  issueKey(opts: {
+    model: string;
+    alias: string;
+    expiresAt: Date;
+    metadata?: Record<string, unknown>;
+    limits?: GatewayKeyLimits;
+  }): Promise<IssuedKey>;
   revokeKey(keyId: string): Promise<void>;
   listSpend(keyIds: string[]): Promise<SpendRecord[]>;
   /**

@@ -20,27 +20,33 @@ export MOCK_UPSTREAM_PORT="8899"
 # host.docker.internal so the *container* reaches the host mock (localhost would point inside the container).
 
 MOCK="" SRV=""
-cleanup(){ for p in "$MOCK" "$SRV"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done; docker compose stop litellm >/dev/null 2>&1 || true; }
+docker_bounded(){ local seconds="$1"; shift; node scripts/run-with-timeout.mjs "$seconds" docker "$@"; }
+cleanup(){ for p in "$MOCK" "$SRV"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done; docker_bounded 45 compose down -v --remove-orphans >/dev/null 2>&1 || true; }
 trap cleanup EXIT
+
+echo "▶ docker control-plane preflight"
+docker_bounded 15 ps --format '{{.ID}}' >/dev/null || { echo "DOCKER API UNAVAILABLE"; exit 1; }
 
 echo "▶ build"; npm run build >/tmp/hcl-build.log 2>&1 || { echo "BUILD FAIL"; tail -20 /tmp/hcl-build.log; exit 1; }
 
 echo "▶ clean slate (wipe pg volume — LiteLLM + hara-control share the DB via separate schemas)"
-docker compose down -v >/dev/null 2>&1 || true
+docker_bounded 60 compose down -v >/dev/null 2>&1 || { echo "COMPOSE CLEANUP FAIL"; exit 1; }
 
-echo "▶ postgres (:5433)"; docker compose up -d postgres >/dev/null 2>&1
-echo -n "  pg"; for i in $(seq 1 30); do docker compose exec -T postgres pg_isready -U hara >/dev/null 2>&1 && { echo " ready"; break; }; echo -n "."; sleep 1; done
-npx prisma migrate deploy >/tmp/hcl-migrate.log 2>&1 || npx prisma migrate dev --name init --skip-generate >/tmp/hcl-migrate.log 2>&1 || true
+echo "▶ postgres (:5433)"; docker_bounded 60 compose up -d postgres >/dev/null 2>&1 || { echo "POSTGRES START FAIL"; exit 1; }
+echo -n "  pg"; for i in $(seq 1 30); do docker_bounded 5 compose exec -T postgres pg_isready -U hara >/dev/null 2>&1 && { echo " ready"; break; }; echo -n "."; sleep 1; [ "$i" = 30 ] && { echo " timeout"; exit 1; }; done
+npx prisma migrate deploy >/tmp/hcl-migrate.log 2>&1 || \
+  npx prisma migrate dev --name init --skip-generate >/tmp/hcl-migrate.log 2>&1 || \
+  { echo "MIGRATION FAIL"; tail -20 /tmp/hcl-migrate.log; exit 1; }
 
 echo "▶ mock upstream (host :$MOCK_UPSTREAM_PORT)"; node phase0/mock-upstream.mjs >/tmp/hcl-mock.log 2>&1 & MOCK=$!
 
 echo "▶ LiteLLM via docker-compose (shared PG → virtual keys; first run pulls the image)"
-docker compose up -d litellm >/tmp/hcl-litellm-up.log 2>&1 || { echo "COMPOSE UP FAIL"; cat /tmp/hcl-litellm-up.log; exit 1; }
+docker_bounded 120 compose up -d litellm >/tmp/hcl-litellm-up.log 2>&1 || { echo "COMPOSE UP FAIL"; cat /tmp/hcl-litellm-up.log; exit 1; }
 echo -n "  waiting litellm"
 for i in $(seq 1 120); do
   curl -sf "localhost:4000/health/readiness" >/dev/null 2>&1 && { echo " up"; break; }
   echo -n "."; sleep 2
-  [ "$i" = 120 ] && { echo " timeout"; docker compose logs --tail=50 litellm; exit 1; }
+  [ "$i" = 120 ] && { echo " timeout"; docker_bounded 30 compose logs --tail=50 litellm; exit 1; }
 done
 
 echo "▶ control plane (host :$PORT, GATEWAY_ADAPTER=litellm)"; node dist/main.js >/tmp/hcl-ctrl.log 2>&1 & SRV=$!

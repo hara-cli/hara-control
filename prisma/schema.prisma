@@ -88,6 +88,10 @@ model EnrollCode {
   expiresAt DateTime
   usedAt    DateTime?             // single-use: set when redeemed
   createdAt DateTime  @default(now())
+  tokenTtlMinutes Int?            // lifetime of the issued internal key; null keeps the operator default
+  budgetLimits    Json      @default("[]") // rolling 5h / 7d / 30d USD windows, validated by the control plane
+  rpmLimit        Int?            // optional data-plane requests-per-minute ceiling
+  tpmLimit        Int?            // optional data-plane tokens-per-minute ceiling
 
   // per-person enroll: binds the enrolled device to a Person so it inherits that person's
   // digital-employee assignments from the first heartbeat (authoritative binding).
@@ -136,6 +140,9 @@ model DeviceToken {
   createdAt    DateTime  @default(now())
   expiresAt    DateTime?           // short-TTL discipline: tokens expire and must be re-enrolled
   revokedAt    DateTime?
+  budgetLimits Json      @default("[]") // immutable policy copied from the one-time enrollment code
+  rpmLimit     Int?
+  tpmLimit     Int?
 
   @@index([deviceId])
 }

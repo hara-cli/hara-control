@@ -29,7 +29,19 @@ export class AdminController {
 
   @Post("enroll-codes")
   createEnrollCode(@Body() dto: CreateEnrollCodeDto) {
-    return this.admin.createEnrollCode(dto.orgId, dto.model, dto.baseUrl, dto.ttlMinutes, dto.personId);
+    return this.admin.createEnrollCode(
+      dto.orgId,
+      dto.model,
+      dto.baseUrl,
+      dto.ttlMinutes,
+      dto.personId,
+      {
+        tokenTtlMinutes: dto.tokenTtlMinutes,
+        budgetLimits: dto.budgetLimits,
+        rpmLimit: dto.rpmLimit,
+        tpmLimit: dto.tpmLimit,
+      },
+    );
   }
 
   @Get("fleet")

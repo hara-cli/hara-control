@@ -4,9 +4,18 @@ import { AuditService } from "../audit/audit.service";
 import { GATEWAY_ADAPTER, GatewayAdapter, IssuedKey } from "../gateway/gateway-adapter";
 import { EntitlementService } from "../license/license.service";
 import { sha256 } from "../common/crypto";
-import { assertTokenUsable, deviceTokenExpiry } from "../security/token-discipline";
+import {
+  assertTokenUsable,
+  deviceTokenExpiry,
+  deviceTokenTtlMinutes,
+} from "../security/token-discipline";
 import { DeviceInfoDto } from "../protocol/dto";
 import { resolveEnrollmentModel } from "../providers/model-policy";
+import { Prisma } from "@prisma/client";
+import {
+  gatewayLimits,
+  parseStoredAccessKeyPolicy,
+} from "../gateway/key-policy";
 
 @Injectable()
 export class EnrollService {
@@ -27,6 +36,15 @@ export class EnrollService {
     }
     await this.entitlement.seatCheck(ec.orgId); // licensed seat cap
     const resolvedModel = resolveEnrollmentModel(ec.model);
+    const accessPolicy = parseStoredAccessKeyPolicy(
+      {
+        tokenTtlMinutes: ec.tokenTtlMinutes,
+        budgetLimits: ec.budgetLimits,
+        rpmLimit: ec.rpmLimit,
+        tpmLimit: ec.tpmLimit,
+      },
+      deviceTokenTtlMinutes(),
+    );
 
     // Claim the one-time code atomically before crossing the gateway boundary. A read followed by a
     // plain update allows two concurrent enroll requests to both issue valid device keys.
@@ -55,12 +73,13 @@ export class EnrollService {
           personId: ec.personId ?? null, // per-person enroll: inherit this person's digital employees
         },
       });
-      const requestedExpiry = deviceTokenExpiry(now);
+      const requestedExpiry = deviceTokenExpiry(now, process.env, accessPolicy.tokenTtlMinutes);
       issued = await this.gateway.issueKey({
         model: resolvedModel,
         alias: dev.id,
         expiresAt: requestedExpiry,
         metadata: { orgId: ec.orgId },
+        limits: gatewayLimits(accessPolicy),
       });
       await this.prisma.deviceToken.create({
         // Use the gateway's authoritative expiry so control-plane and model data-plane access stop
@@ -71,9 +90,16 @@ export class EnrollService {
           gatewayKeyId: issued.keyId,
           model: resolvedModel,
           expiresAt: issued.expiresAt,
+          budgetLimits: accessPolicy.budgetLimits as unknown as Prisma.InputJsonValue,
+          rpmLimit: accessPolicy.rpmLimit,
+          tpmLimit: accessPolicy.tpmLimit,
         },
       });
-      await this.audit.log(ec.orgId, "enroll", "device", dev.id, { name: device.name, os: device.os });
+      await this.audit.log(ec.orgId, "enroll", "device", dev.id, {
+        name: device.name,
+        os: device.os,
+        accessPolicy,
+      });
 
       return {
         device_token: issued.key,
@@ -81,6 +107,7 @@ export class EnrollService {
         model: resolvedModel,
         base_url: ec.baseUrl ?? undefined,
         expires_at: issued.expiresAt.toISOString(),
+        access_policy: accessPolicy,
       };
     } catch (error) {
       // External key issue + local writes cannot be one database transaction. Compensate every

@@ -2,8 +2,27 @@
 // (src/org-fleet/enroll.ts). The shared @nanhara/hara-protocol package (extracted on the open CLI
 // side later) will own these types; the closed server will depend on it.
 import { Type } from "class-transformer";
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Min, ValidateNested } from "class-validator";
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from "class-validator";
 import { OrgUnitType } from "@prisma/client";
+import {
+  MAX_BUDGET_USD,
+  MAX_RPM_LIMIT,
+  MAX_TOKEN_TTL_MINUTES,
+  MAX_TPM_LIMIT,
+  MIN_TOKEN_TTL_MINUTES,
+} from "../gateway/key-policy";
 
 export class DeviceInfoDto {
   @IsString() @IsNotEmpty() name!: string;
@@ -31,11 +50,27 @@ export class CreateOrgDto {
   @IsString() @IsOptional() parentId?: string;
 }
 
+export enum AccessBudgetWindowDto {
+  FIVE_HOURS = "5h",
+  WEEK = "week",
+  MONTH = "month",
+}
+
+export class AccessBudgetLimitDto {
+  @IsEnum(AccessBudgetWindowDto) window!: AccessBudgetWindowDto;
+  @IsNumber({ maxDecimalPlaces: 6 }) @Min(0.01) @Max(MAX_BUDGET_USD) maxUsd!: number;
+}
+
 export class CreateEnrollCodeDto {
   @IsString() @IsNotEmpty() orgId!: string;
   @IsString() @IsOptional() model?: string;
   @IsString() @IsOptional() baseUrl?: string;
   @IsInt() @Min(1) @IsOptional() ttlMinutes?: number;
+  @IsInt() @Min(MIN_TOKEN_TTL_MINUTES) @Max(MAX_TOKEN_TTL_MINUTES) @IsOptional() tokenTtlMinutes?: number;
+  @IsArray() @ArrayMaxSize(3) @ValidateNested({ each: true }) @Type(() => AccessBudgetLimitDto) @IsOptional()
+  budgetLimits?: AccessBudgetLimitDto[];
+  @IsInt() @Min(1) @Max(MAX_RPM_LIMIT) @IsOptional() rpmLimit?: number;
+  @IsInt() @Min(1) @Max(MAX_TPM_LIMIT) @IsOptional() tpmLimit?: number;
   // per-person enroll: bind the resulting device to this Person (inherits their digital employees)
   @IsString() @IsOptional() personId?: string;
 }

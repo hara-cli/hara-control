@@ -283,6 +283,51 @@
               <label class="field__label" for="ec-gateway" data-i18n="enroll.gateway">Gateway URL</label>
               <input class="input input--mono" id="ec-gateway" type="text" value="https://gw.nanhara.tech" data-i18n-placeholder="enroll.gateway.placeholder">
             </div>
+            <section class="policy-editor" aria-labelledby="ec-policy-title">
+              <div class="policy-editor__head">
+                <div>
+                  <h3 class="policy-editor__title" id="ec-policy-title" data-i18n="enroll.policy.title">Internal key policy</h3>
+                  <p class="policy-editor__hint" data-i18n="enroll.policy.hint">The key is issued only after this one-time code is redeemed.</p>
+                </div>
+                <span class="pill pill--accent" data-i18n="enroll.policy.enforced">Gateway enforced</span>
+              </div>
+              <div class="field">
+                <label class="field__label" for="ec-token-days" data-i18n="enroll.policy.token_days">Key validity (days)</label>
+                <input class="input" id="ec-token-days" type="number" min="1" max="365" step="1" value="7" inputmode="numeric">
+                <div class="field__hint" data-i18n="enroll.policy.token_days.hint">The colleague must re-enroll after this period.</div>
+              </div>
+              <div class="field">
+                <span class="field__label" data-i18n="enroll.policy.budgets">Rolling spend limits (USD)</span>
+                <div class="quota-grid">
+                  <label class="quota-field" for="ec-budget-5h">
+                    <span data-i18n="enroll.policy.window.5h">5 hours</span>
+                    <span class="input-unit"><span>$</span><input id="ec-budget-5h" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" data-i18n-placeholder="enroll.policy.unlimited" placeholder="Unlimited"></span>
+                  </label>
+                  <label class="quota-field" for="ec-budget-week">
+                    <span data-i18n="enroll.policy.window.week">7 days</span>
+                    <span class="input-unit"><span>$</span><input id="ec-budget-week" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" data-i18n-placeholder="enroll.policy.unlimited" placeholder="Unlimited"></span>
+                  </label>
+                  <label class="quota-field" for="ec-budget-month">
+                    <span data-i18n="enroll.policy.window.month">30 days</span>
+                    <span class="input-unit"><span>$</span><input id="ec-budget-month" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" data-i18n-placeholder="enroll.policy.unlimited" placeholder="Unlimited"></span>
+                  </label>
+                </div>
+                <div class="field__hint" data-i18n="enroll.policy.budgets.hint">Each non-empty window is enforced independently and resets from the key's issue time.</div>
+              </div>
+              <details class="policy-editor__advanced">
+                <summary data-i18n="enroll.policy.advanced">Advanced rate limits</summary>
+                <div class="policy-rate-grid">
+                  <div class="field">
+                    <label class="field__label" for="ec-rpm" data-i18n="enroll.policy.rpm">Requests per minute</label>
+                    <input class="input" id="ec-rpm" type="number" min="1" max="1000000" step="1" inputmode="numeric" data-i18n-placeholder="enroll.policy.unlimited" placeholder="Unlimited">
+                  </div>
+                  <div class="field">
+                    <label class="field__label" for="ec-tpm" data-i18n="enroll.policy.tpm">Tokens per minute</label>
+                    <input class="input" id="ec-tpm" type="number" min="1" max="1000000000" step="1" inputmode="numeric" data-i18n-placeholder="enroll.policy.unlimited" placeholder="Unlimited">
+                  </div>
+                </div>
+              </details>
+            </section>
             <button type="button" class="btn mt-1" id="ec-create" data-i18n="enroll.mint">Mint code</button>
           </div>
           <div id="ec-result" class="hidden">
@@ -311,6 +356,10 @@
             <div class="field">
               <label class="field__label" data-i18n="enroll.result.expires">Expires</label>
               <div class="mono small" id="ec-expires"></div>
+            </div>
+            <div class="field">
+              <label class="field__label" data-i18n="enroll.result.policy">Issued key policy</label>
+              <div class="policy-result" id="ec-policy-result"></div>
             </div>
           </div>
         </div>

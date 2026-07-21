@@ -7,7 +7,7 @@ import { randomId } from "../common/crypto";
 export class MockGatewayAdapter implements GatewayAdapter {
   private readonly spend = new Map<string, number>();
 
-  async issueKey({ alias, expiresAt }: { model: string; alias: string; expiresAt: Date }): Promise<IssuedKey> {
+  async issueKey({ alias, expiresAt }: Parameters<GatewayAdapter["issueKey"]>[0]): Promise<IssuedKey> {
     this.spend.set(alias, 0);
     return { key: randomId("sk-hara-mock-"), keyId: alias, expiresAt };
   }

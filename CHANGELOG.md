@@ -2,6 +2,14 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.8 - 2026-07-22
+
+### Fixed
+
+- Preserve the managed `.litellm-venvs/` directory in both release rollback archives and source
+  `rsync --delete`. Deployments no longer compress gigabytes of reproducible Python runtimes or
+  discard the already verified pinned LiteLLM environment before startup.
+
 ## 0.1.7 - 2026-07-22
 
 ### Fixed

@@ -50,11 +50,14 @@ test("forced receiver backs up code and preserves every production secret/runtim
     ".npmrc",
     "node_modules/",
     ".litellm-venv/",
+    ".litellm-venvs/",
     ".litellm-runtime/",
     "postgres-data/",
   ]) {
     assert.ok(receiver.includes(`--exclude='${boundary}'`), `missing preserved boundary: ${boundary}`);
   }
+  assert.match(receiver, /--exclude='\.\/\.litellm-venvs'/, "versioned runtimes must be excluded from rollback archives");
+  assert.match(receiver, /--exclude='\.litellm-venvs\/'/, "versioned runtimes must survive rsync --delete");
 });
 
 test("LiteLLM runtime pins its database client and never reuses a drifted virtualenv", () => {

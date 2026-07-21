@@ -68,6 +68,7 @@ if [[ -d "$APP_DIR" ]]; then
     --exclude='./.npmrc' \
     --exclude='./node_modules' \
     --exclude='./.litellm-venv' \
+    --exclude='./.litellm-venvs' \
     --exclude='./.litellm-runtime' \
     --exclude='./postgres-data' \
     --exclude='./phase0/.run' \
@@ -82,6 +83,7 @@ rsync -a --delete --chown=root:root \
   --exclude='.npmrc' \
   --exclude='node_modules/' \
   --exclude='.litellm-venv/' \
+  --exclude='.litellm-venvs/' \
   --exclude='.litellm-runtime/' \
   --exclude='postgres-data/' \
   --exclude='phase0/.run/' \

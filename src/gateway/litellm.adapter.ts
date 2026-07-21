@@ -12,6 +12,20 @@ export function liteLLMKeyDuration(expiresAt: Date, now = new Date()): string {
   return `${Math.max(1, Math.floor(remainingMs / 1_000))}s`;
 }
 
+export async function liteLLMKeyManagementReady(
+  get: (path: string) => Promise<Record<string, unknown>>,
+): Promise<boolean> {
+  try {
+    // `/key/list` asks LiteLLM's generated Prisma client to read the complete verification-token
+    // model. That makes an additive-schema mismatch (for example a newly required column) fail
+    // here before enrollment does, without creating a key or making a paid provider request.
+    await get("/key/list?page=1&size=1");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Talks to the embedded LiteLLM proxy's admin API. The device token IS a LiteLLM virtual key scoped
 // to a model; the real provider key stays inside LiteLLM. We never store the raw key — revocation is
 // keyed off the alias we set (= the device id).
@@ -20,6 +34,25 @@ export class LiteLLMAdapter implements GatewayAdapter {
   private readonly log = new Logger(LiteLLMAdapter.name);
   private readonly base = (process.env.LITELLM_URL || "http://localhost:4000").replace(/\/$/, "");
   private readonly masterKey = process.env.LITELLM_MASTER_KEY || "";
+
+  private async get(path: string): Promise<Record<string, unknown>> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await safeFetch(`${this.base}${path}`, {
+        method: "GET",
+        headers: this.masterKey ? { authorization: `Bearer ${this.masterKey}` } : {},
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => undefined);
+        throw new Error(`LiteLLM ${path} -> HTTP ${res.status}`);
+      }
+      return (await res.json()) as Record<string, unknown>;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   private async call(path: string, body: unknown): Promise<Record<string, unknown>> {
     // safeFetch enforces the SSRF allow-list + private-address guard on the configured upstream
@@ -122,7 +155,13 @@ export class LiteLLMAdapter implements GatewayAdapter {
           headers: this.masterKey ? { authorization: `Bearer ${this.masterKey}` } : {},
           signal: controller.signal,
         });
-        return { ok: res.ok };
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => undefined);
+          return { ok: false };
+        }
+        return {
+          ok: await liteLLMKeyManagementReady((path) => this.get(path)),
+        };
       } finally {
         clearTimeout(timer);
       }

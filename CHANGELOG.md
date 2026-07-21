@@ -2,6 +2,20 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.7 - 2026-07-22
+
+### Fixed
+
+- Synchronize the isolated LiteLLM database from the exact pinned 1.92.0 `schema.prisma` before
+  startup. The deploy previews the generated SQL, refuses destructive operations, applies `db push`
+  without `--accept-data-loss`, and requires a zero-drift recheck.
+- Disable LiteLLM's own best-effort runtime schema mutation after the verified deploy-time sync, so
+  a failed migration cannot leave a seemingly online proxy backed by an incompatible Key schema.
+- Make `/health/ready` exercise the authenticated, read-only `/key/list` path in addition to process
+  liveliness, covering the same Key-management tables required by enroll and revoke.
+- Point the documented production Control and LiteLLM URLs at the replacement Aliyun RDS host while
+  preserving separate `public` and `litellm` schemas.
+
 ## 0.1.6 - 2026-07-20
 
 ### Fixed

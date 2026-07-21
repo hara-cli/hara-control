@@ -10,7 +10,9 @@ pinned LiteLLM runtime, encrypted provider-key copy and readiness checks describ
 > - **CN can't reach Docker Hub** from `ai`, and the box's configured mirrors are dead → the dockerized
 >   Postgres path failed. We pivoted to **Aliyun RDS PostgreSQL** (`pgm-…pg.rds.aliyuncs.com`, db `hara_db`,
 >   VPC-intranet, pgvector available) + a **dockerless** deploy (`deploy-ai-rds.sh`: `npm ci`→build→
->   `prisma migrate deploy`→pm2). Migrations are applied through Prisma; Nest runs under pm2 on
+>   `prisma migrate deploy`→safe LiteLLM schema diff/push→pm2). Hara migrations are applied through
+>   Prisma; LiteLLM's isolated schema is compared with the pinned 1.92.0 datamodel, destructive plans
+>   are refused, and runtime auto-mutation is disabled. Nest runs under pm2 on
 >   `127.0.0.1:4100`. Use
 >   the npmmirror registry + `PRISMA_ENGINES_MIRROR` on the box.
 > - **`ai` is the LIVE prod backend box** (pm2 runs `yimatrix-api`, `nanyiapp-api`, …). Keep everything
@@ -109,6 +111,9 @@ bundle into `~/.hara/org-roles/` (the 0.70 feature) — verify with `hara roles`
   `DATABASE_URL?...schema=public` and `LITELLM_DATABASE_URL?...schema=litellm`.
 - LiteLLM is pinned to 1.92.0 with its exact Python Prisma runtime and rebuilt into a
   requirements-fingerprinted virtualenv; mutable `main-stable` and dependency-drift reuse are forbidden.
+- The deploy explicitly synchronizes the isolated LiteLLM schema without `--accept-data-loss`, rechecks
+  zero drift, and starts the proxy with `DISABLE_SCHEMA_UPDATE=true`. `/health/ready` then exercises the
+  read-only key-management API, not only process liveliness.
 
 ## 8. Teardown
 ```bash

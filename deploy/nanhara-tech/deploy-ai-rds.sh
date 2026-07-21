@@ -26,6 +26,7 @@ fi
 command -v pm2  >/dev/null || { echo "… installing pm2 globally"; npm i -g pm2; }
 NODE_BIN="$(command -v node)"
 PM2_BIN="$(command -v pm2)"
+ENV_BIN="$(command -v env)"
 PM2_HOME_VALUE="${PM2_HOME:-$HOME/.pm2}"
 
 # PM2 serializes the environment presented by its client. Invoke every mutating PM2 command from a
@@ -63,23 +64,29 @@ npm prune --omit=dev
 
 GATEWAY_MODE="${GATEWAY_ADAPTER:-mock}"
 PM2_ASSERT_NAMES=("$PM2_NAME")
+if [ "$GATEWAY_MODE" = "litellm" ]; then
+  echo "▶ build/verify pinned LiteLLM runtime"
+  bash scripts/ensure-litellm-venv.sh
+  echo "▶ verify/synchronize isolated LiteLLM schema"
+  node scripts/sync-litellm-schema.mjs
+fi
 # The remaining process launches must not inherit credentials from this deployment shell.
 unset DATABASE_URL LITELLM_DATABASE_URL HARA_CONTROL_ADMIN_KEY HARA_JWT_SECRET
 unset HARA_KMS_MASTER_KEY HARA_KMS_KEYFILE LITELLM_MASTER_KEY UPSTREAM_API_KEY
 
 if [ "$GATEWAY_MODE" = "litellm" ]; then
   PM2_ASSERT_NAMES+=("$LITELLM_PM2_NAME")
-  echo "▶ build/verify pinned LiteLLM runtime"
-  bash scripts/ensure-litellm-venv.sh
   # Always recreate the PM2 definition so an older direct-LiteLLM command cannot survive an
   # upgrade. The Node supervisor decrypts the current revision in memory and substitutes the
-  # isolated LiteLLM database URL only for its child process.
+  # isolated LiteLLM database URL only for its child process. Runtime schema mutation is disabled:
+  # the explicit non-destructive sync above is the only production schema writer.
   pm2_clean delete "$LITELLM_PM2_NAME" >/dev/null 2>&1 || true
   pm2_clean start "$APP_DIR/scripts/with-production-env.mjs" \
     --name "$LITELLM_PM2_NAME" \
     --interpreter "$NODE_BIN" -- \
     "$APP_DIR/.env" -- "$NODE_BIN" \
     "$APP_DIR/dist/ops/provider-secret.js" run-deepseek -- \
+    "$ENV_BIN" DISABLE_SCHEMA_UPDATE=true \
     "$APP_DIR/.litellm-venv/bin/litellm" \
     --config "$APP_DIR/litellm/config.yaml" --host 127.0.0.1 --port 4000
   litellm_ready=0

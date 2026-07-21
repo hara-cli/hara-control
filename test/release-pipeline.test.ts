@@ -16,6 +16,10 @@ const liteLlmInstaller = readFileSync(
   resolve("scripts/ensure-litellm-venv.sh"),
   "utf8",
 );
+const rdsDeploy = readFileSync(
+  resolve("deploy/nanhara-tech/deploy-ai-rds.sh"),
+  "utf8",
+);
 
 test("tag release deploys only after the verified multi-arch image through a protected environment", () => {
   assert.match(workflow, /deploy_production:\n\s+needs: image/);
@@ -69,4 +73,13 @@ test("LiteLLM runtime pins its database client and never reuses a drifted virtua
   assert.match(liteLlmInstaller, /env -i/);
   assert.match(liteLlmInstaller, /DATABASE_URL="postgresql:\/\/unused:unused@127\.0\.0\.1:1\/unused"/);
   assert.match(liteLlmInstaller, /schema\.is_file\(\)/);
+});
+
+test("RDS deploy synchronizes LiteLLM schema before startup and disables runtime mutation", () => {
+  const ensureAt = rdsDeploy.indexOf("bash scripts/ensure-litellm-venv.sh");
+  const syncAt = rdsDeploy.indexOf("node scripts/sync-litellm-schema.mjs");
+  const startAt = rdsDeploy.indexOf('pm2_clean start "$APP_DIR/scripts/with-production-env.mjs"');
+  assert.ok(ensureAt >= 0 && syncAt > ensureAt && startAt > syncAt);
+  assert.match(rdsDeploy, /DISABLE_SCHEMA_UPDATE=true/);
+  assert.doesNotMatch(rdsDeploy, /--accept-data-loss/);
 });

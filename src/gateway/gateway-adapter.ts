@@ -26,8 +26,8 @@ export interface GatewayAdapter {
   revokeKey(keyId: string): Promise<void>;
   listSpend(keyIds: string[]): Promise<SpendRecord[]>;
   /**
-   * Cheap process-level readiness only. It must not issue a provider completion, expose upstream
-   * details, or turn a paid model request into a public health-check side effect.
+   * Cheap read-only readiness. It must verify the key-management data path without issuing a
+   * provider completion, exposing upstream details, or creating/revoking credentials.
    */
   readiness(): Promise<GatewayReadiness>;
 }

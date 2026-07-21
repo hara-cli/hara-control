@@ -37,8 +37,8 @@ jobs:
             echo "Release tag v${tag_version} does not match package.json ${package_version}." >&2
             exit 1
           fi
-      - name: Audit production dependencies against the official registry
-        run: npm audit --omit=dev --registry=https://registry.npmjs.org
+      - name: Audit runtime and build dependencies against the official registry
+        run: npm audit --registry=https://registry.npmjs.org
       - run: npm test
       - run: npm run build
       - name: Validate the Prisma schema

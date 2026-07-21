@@ -31,6 +31,11 @@ test("tag release deploys only after the verified multi-arch image through a pro
   assert.doesNotMatch(workflow, /ssh-keyscan/);
 });
 
+test("release verification audits the build toolchain as well as runtime dependencies", () => {
+  assert.match(workflow, /npm audit --registry=https:\/\/registry\.npmjs\.org/);
+  assert.doesNotMatch(workflow, /npm audit[^\n]*--omit=dev/);
+});
+
 test("forced receiver accepts only a stable tag plus exact workflow SHA", () => {
   assert.match(receiver, /SSH_ORIGINAL_COMMAND/);
   assert.match(receiver, /\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$/);

@@ -533,7 +533,7 @@
                 <td>${escapeHtml(d.name || "—")}</td>
                 <td>${escapeHtml(d.os || "—")}</td>
                 <td>${escapeHtml(d.model || "—")}</td>
-                <td class="num">$${Number(d.spend ?? 0).toFixed(2)}</td>
+                <td class="num">${escapeHtml(formatSpend(d))}</td>
                 <td>
                   <div>${escapeHtml(d.expires_at
                     ? I18N.t("fleet.policy.expires", { date: formatDateTime(d.expires_at) })
@@ -603,6 +603,13 @@
       const label = I18N.t(`enroll.policy.window.${entry.window}`);
       return `${label} · $${Number(entry.maxUsd ?? 0).toFixed(2)}`;
     }).join(" / ");
+  }
+
+  function formatSpend(device) {
+    const spend = Number(device?.spend);
+    return device?.spend_available === true && Number.isFinite(spend)
+      ? `$${spend.toFixed(2)}`
+      : I18N.t("fleet.spend.unavailable");
   }
 
   function formatRateSummary(rpmLimit, tpmLimit) {

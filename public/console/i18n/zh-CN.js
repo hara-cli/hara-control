@@ -92,6 +92,7 @@
     "fleet.col.os": "系统",
     "fleet.col.model": "模型",
     "fleet.col.spend": "用量",
+    "fleet.spend.unavailable": "暂不可用",
     "fleet.col.policy": "内部 Key 策略",
     "fleet.col.id": "设备 ID",
     "fleet.col.actions": "操作",

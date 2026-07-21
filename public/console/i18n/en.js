@@ -92,6 +92,7 @@
     "fleet.col.os": "OS",
     "fleet.col.model": "Model",
     "fleet.col.spend": "Spend",
+    "fleet.spend.unavailable": "Unavailable",
     "fleet.col.policy": "Internal key policy",
     "fleet.col.id": "Device ID",
     "fleet.col.actions": "Actions",

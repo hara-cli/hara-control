@@ -560,7 +560,7 @@
                 <td>${escapeHtml(d.name || '')}</td>
                 <td>${escapeHtml(d.os || '')}</td>
                 <td>${escapeHtml(d.model || '-')}</td>
-                <td>$${Number(d.spend ?? 0).toFixed(2)}</td>
+                <td>${d.spend_available === true && Number.isFinite(Number(d.spend)) ? `$${Number(d.spend).toFixed(2)}` : 'unavailable'}</td>
                 <td class="mono">${escapeHtml(d.device_id)}</td>
                 <td>${d.token_active ? `<button class="danger" data-revoke="${escapeHtml(d.device_id)}">Revoke</button>` : '<span class="small">revoked</span>'}</td>
               </tr>`).join('')}

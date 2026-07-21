@@ -33,7 +33,10 @@ export function fmtFleet(rows: any[]): string {
     .map((d) => {
       const dot = d.online ? "●" : "○";
       const revoked = d.token_active ? "" : " [revoked]";
-      return `${dot} ${String(d.name || d.device_id).padEnd(22)} ${String(d.os || "").padEnd(7)} ${String(d.model || "-").padEnd(14)} $${Number(d.spend ?? 0).toFixed(2)}  ${d.device_id}${revoked}`;
+      const spend = d.spend_available === true && Number.isFinite(Number(d.spend))
+        ? `$${Number(d.spend).toFixed(2)}`
+        : "—";
+      return `${dot} ${String(d.name || d.device_id).padEnd(22)} ${String(d.os || "").padEnd(7)} ${String(d.model || "-").padEnd(14)} ${spend.padStart(7)}  ${d.device_id}${revoked}`;
     })
     .join("\n");
 }

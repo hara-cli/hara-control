@@ -1,7 +1,9 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { GatewayAdapter, GatewayReadiness, IssuedKey, SpendRecord } from "./gateway-adapter";
 import { safeFetch } from "../security/ssrf";
 import { GatewayKeyLimits } from "./key-policy";
+import { PrismaService } from "../prisma/prisma.service";
 
 /** LiteLLM accepts compact durations such as `20m`, `30d`, and `600s`. Floor to a whole
  * second so the data-plane token can never outlive the control-plane request boundary. */
@@ -80,6 +82,28 @@ export async function liteLLMKeyManagementReady(
   }
 }
 
+export function normalizeLiteLLMSpendRows(
+  keyIds: string[],
+  rows: Array<{ keyId: unknown; spend: unknown }>,
+): SpendRecord[] {
+  const byAlias = new Map<string, number>();
+  for (const row of rows) {
+    if (typeof row.keyId !== "string") continue;
+    const spend = Number(row.spend);
+    if (Number.isFinite(spend)) byAlias.set(row.keyId, spend);
+  }
+  return keyIds.map((keyId) => ({ keyId, spend: byAlias.get(keyId) ?? null }));
+}
+
+export async function liteLLMSpendSchemaReady(query: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await query();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Talks to the embedded LiteLLM proxy's admin API. The device token IS a LiteLLM virtual key scoped
 // to a model; the real provider key stays inside LiteLLM. We never store the raw key — revocation is
 // keyed off the alias we set (= the device id).
@@ -88,6 +112,8 @@ export class LiteLLMAdapter implements GatewayAdapter {
   private readonly log = new Logger(LiteLLMAdapter.name);
   private readonly base = (process.env.LITELLM_URL || "http://localhost:4000").replace(/\/$/, "");
   private readonly masterKey = process.env.LITELLM_MASTER_KEY || "";
+
+  constructor(private readonly prisma: PrismaService) {}
 
   private async get(path: string): Promise<Record<string, unknown>> {
     const controller = new AbortController();
@@ -188,14 +214,20 @@ export class LiteLLMAdapter implements GatewayAdapter {
   async listSpend(keyIds: string[]): Promise<SpendRecord[]> {
     if (!keyIds.length) return [];
     try {
-      // shape varies across LiteLLM versions; tolerate + fall back to zero. The authoritative usage
-      // join (spend tables in the shared Postgres) lands once LiteLLM runs against our PG.
-      const j = await this.call("/key/info", { key_aliases: keyIds });
-      const rows = Array.isArray((j as { keys?: unknown }).keys) ? ((j as { keys: Record<string, unknown>[] }).keys) : [];
-      return rows.map((r) => ({ keyId: String(r.key_alias ?? ""), spend: Number(r.spend ?? 0) }));
-    } catch (e) {
-      this.log.warn(`spend lookup failed: ${(e as Error).message}`);
-      return keyIds.map((keyId) => ({ keyId, spend: 0 }));
+      // LiteLLM 1.92 exposes GET /key/info only by raw virtual key, which Hara deliberately never
+      // stores. Production shares the same PostgreSQL database, so query the isolated LiteLLM schema
+      // by our non-secret device alias instead. Prisma.sql keeps every alias parameterized.
+      const rows = await this.prisma.$queryRaw<Array<{ keyId: unknown; spend: unknown }>>(
+        Prisma.sql`
+          SELECT "key_alias" AS "keyId", "spend"
+            FROM "litellm"."LiteLLM_VerificationToken"
+           WHERE "key_alias" IN (${Prisma.join(keyIds)})
+        `,
+      );
+      return normalizeLiteLLMSpendRows(keyIds, rows);
+    } catch {
+      this.log.warn("LiteLLM spend lookup unavailable; fleet will expose null instead of a false zero");
+      return keyIds.map((keyId) => ({ keyId, spend: null }));
     }
   }
 
@@ -213,9 +245,19 @@ export class LiteLLMAdapter implements GatewayAdapter {
           await res.body?.cancel().catch(() => undefined);
           return { ok: false };
         }
-        return {
-          ok: await liteLLMKeyManagementReady((path) => this.get(path)),
-        };
+        const [keyManagement, spendSchema] = await Promise.all([
+          liteLLMKeyManagementReady((path) => this.get(path)),
+          liteLLMSpendSchemaReady(() =>
+            this.prisma.$queryRaw(
+              Prisma.sql`
+                SELECT "key_alias", "spend"
+                  FROM "litellm"."LiteLLM_VerificationToken"
+                 WHERE FALSE
+              `,
+            ),
+          ),
+        ]);
+        return { ok: keyManagement && spendSchema };
       } finally {
         clearTimeout(timer);
       }

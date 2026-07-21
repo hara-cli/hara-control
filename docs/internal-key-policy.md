@@ -61,6 +61,19 @@ consumed once.
 5. Expired keys are excluded from the active fleet view. Explicit device revoke invalidates the key in both
    the control plane and LiteLLM.
 
+## Fleet spend integrity
+
+Hara never stores the raw LiteLLM virtual key after enrollment, so fleet usage must not call an endpoint
+that requires that raw key. In a formal LiteLLM deployment, Control reads only `key_alias` and `spend`
+from the isolated `litellm.LiteLLM_VerificationToken` table in the shared PostgreSQL database. Alias
+filters are parameterized, and neither the token column nor provider credentials are selected.
+
+The fleet response includes `spend_available`. A real zero is returned as `spend: 0` with
+`spend_available: true`; a missing/unreadable authoritative source is `spend: null` with
+`spend_available: false`. The console renders the latter as unavailable rather than a misleading
+`$0.00`. Production readiness also checks that the isolated alias/spend columns are readable, so schema
+or permission drift fails closed before a deployment is declared healthy.
+
 Internal access policy is distinct from upstream provider-key management. Multiple encrypted upstream
 connections, key-pool routing, weights, and provider health are a separate control-plane feature; changing
 an internal colleague limit must not rotate or expose any provider credential.

@@ -16,7 +16,8 @@ export interface IssuedKey {
 
 export interface SpendRecord {
   keyId: string;
-  spend: number;
+  /** null means the authoritative usage source could not provide a value; never substitute fake zero. */
+  spend: number | null;
 }
 
 export interface GatewayReadiness {

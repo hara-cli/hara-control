@@ -92,6 +92,7 @@
     "fleet.col.os": "作業系統",
     "fleet.col.model": "模型",
     "fleet.col.spend": "用量",
+    "fleet.spend.unavailable": "暫時無法取得",
     "fleet.col.policy": "內部 Key 策略",
     "fleet.col.id": "裝置 ID",
     "fleet.col.actions": "操作",

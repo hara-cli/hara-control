@@ -4,6 +4,9 @@
 //   that key actually works against the gateway -> proxied to the (mock) upstream
 //   revoke at the control plane -> the key dies at the gateway (chat now 401)
 // No real provider key needed (mock upstream). Run via scripts/e2e-litellm.sh.
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+
 const CTRL = process.env.HARA_CONTROL_URL || "http://localhost:4100";
 const LITELLM = process.env.LITELLM_URL || "http://localhost:4000";
 const ADMIN = process.env.HARA_CONTROL_ADMIN_KEY || "admin-dev-e2e";
@@ -28,17 +31,29 @@ const POLICY = {
   tpmLimit: 500_000,
 };
 
-const policyMatches = (policy) =>
+export const EXPECTED_BUDGETS = [
+  { window: "5h", maxUsd: 2, budgetDuration: "5h" },
+  { window: "week", maxUsd: 20, budgetDuration: "7d" },
+  { window: "month", maxUsd: 60, budgetDuration: "30d" },
+];
+
+export const budgetsMatch = (limits) => {
+  if (!Array.isArray(limits) || limits.length !== EXPECTED_BUDGETS.length) return false;
+  const canonical = (entries) => entries.map((entry) => ({
+    window: entry?.window,
+    maxUsd: Number(entry?.maxUsd),
+    budgetDuration: entry?.budgetDuration,
+  })).sort((a, b) => String(a.window).localeCompare(String(b.window)));
+  return JSON.stringify(canonical(limits)) === JSON.stringify(canonical(EXPECTED_BUDGETS));
+};
+
+export const policyMatches = (policy) =>
   policy?.tokenTtlMinutes === POLICY.tokenTtlMinutes &&
   policy?.rpmLimit === POLICY.rpmLimit &&
   policy?.tpmLimit === POLICY.tpmLimit &&
-  JSON.stringify(policy?.budgetLimits) === JSON.stringify([
-    { window: "5h", maxUsd: 2, budgetDuration: "5h" },
-    { window: "week", maxUsd: 20, budgetDuration: "7d" },
-    { window: "month", maxUsd: 60, budgetDuration: "30d" },
-  ]);
+  budgetsMatch(policy?.budgetLimits);
 
-(async () => {
+export async function run() {
   let r = await adminReq("/admin/orgs", { name: "litellm-e2e" });
   ok(r.ok, `create org -> ${r.status}`);
   const org = await r.json();
@@ -71,10 +86,7 @@ const policyMatches = (policy) =>
   const row = fleet.find((candidate) => candidate.device_id === enr.device_id);
   ok(row?.token_active === true, "fleet shows the limited token as active");
   ok(row?.rpm_limit === POLICY.rpmLimit && row?.tpm_limit === POLICY.tpmLimit, "fleet exposes RPM/TPM limits");
-  ok(
-    JSON.stringify(row?.budget_limits) === JSON.stringify(enr.access_policy.budgetLimits),
-    "fleet exposes the same rolling budget policy",
-  );
+  ok(budgetsMatch(row?.budget_limits), "fleet exposes the same rolling budget policy");
 
   // the minted key works against the gateway -> mock upstream
   r = await chat(enr.device_token);
@@ -93,5 +105,12 @@ const policyMatches = (policy) =>
   console.log(`  · post-revoke chat correctly rejected (${r.status})`);
 
   console.log("PHASE-1.5 E2E PASS: limited enroll -> LiteLLM confirms policy -> chat works -> revoke kills the key");
-  process.exit(0);
-})().catch((e) => { console.error(`PHASE-1.5 E2E FAIL: ${e.message}`); process.exit(1); });
+}
+
+const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  run().catch((error) => {
+    console.error(`PHASE-1.5 E2E FAIL: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

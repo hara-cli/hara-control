@@ -123,7 +123,7 @@ services:
       retries: 10
 
   control:
-    image: ghcr.io/hara-cli/hara-control:0.1.10  # pin releases in production
+    image: ghcr.io/hara-cli/hara-control:0.1.11  # pin releases in production
     depends_on:
       postgres:
         condition: service_healthy
@@ -167,7 +167,7 @@ docker run -d --name hara-control -p 4100:4100 \
   -e HARA_KMS_KEYFILE=/run/hara-secrets/kms-master.key \
   -v "$PWD/secrets/kms-master.key:/run/hara-secrets/kms-master.key:ro" \
   -e GATEWAY_ADAPTER=mock \
-  ghcr.io/hara-cli/hara-control:0.1.10
+  ghcr.io/hara-cli/hara-control:0.1.11
 ```
 
 Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database>?schema=public`.

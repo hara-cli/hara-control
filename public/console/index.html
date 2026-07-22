@@ -86,6 +86,12 @@
         </span>
         <span data-i18n="nav.fleet">Fleet</span>
       </a>
+      <a class="sidebar__item" href="#/usage" data-route="usage">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19V2"/><path d="M2 19h22"/></svg>
+        </span>
+        <span data-i18n="nav.usage">Usage</span>
+      </a>
       <a class="sidebar__item" href="#/enroll" data-route="enroll">
         <span class="sidebar__item-icon" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3"/><path d="M9 3h6v8H9z"/></svg>
@@ -240,7 +246,7 @@
         <div class="field" style="margin: 0;">
           <label class="field__label" for="fleet-orgid" data-i18n="fleet.orgid">Org ID</label>
           <div class="row">
-            <input class="input input--mono" id="fleet-orgid" type="text" data-i18n-placeholder="fleet.orgid.placeholder">
+            <input class="input input--mono" id="fleet-orgid" type="text" list="org-options" data-i18n-placeholder="fleet.orgid.placeholder">
             <button type="button" class="btn-ghost row__fixed" id="fleet-load" data-i18n="fleet.load">Load</button>
           </div>
         </div>
@@ -259,6 +265,95 @@
       <div id="fleet-table"></div>
     </section>
 
+    <!-- USAGE -->
+    <section class="view hidden" id="view-usage" data-view="usage">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.usage">Usage</h1>
+          <p class="view__subtitle" data-i18n="usage.hint">A metered timeline of spend, tokens, requests, and remaining internal-key quota.</p>
+        </div>
+        <div class="usage-updated mono" id="usage-updated">—</div>
+      </div>
+
+      <section class="card usage-toolbar">
+        <div class="usage-toolbar__org">
+          <label class="field__label" for="usage-orgid" data-i18n="usage.org">Organization</label>
+          <select class="select" id="usage-orgid">
+            <option value="" data-i18n="usage.org.choose">Choose an organization…</option>
+          </select>
+        </div>
+        <div class="usage-toolbar__range">
+          <span class="field__label" data-i18n="usage.range">Time range</span>
+          <div class="segmented" role="group" aria-label="Usage time range">
+            <button type="button" class="segmented__item segmented__item--active" data-usage-range="24h" aria-pressed="true" data-i18n="usage.range.24h">24 hours</button>
+            <button type="button" class="segmented__item" data-usage-range="7d" aria-pressed="false" data-i18n="usage.range.7d">7 days</button>
+            <button type="button" class="segmented__item" data-usage-range="30d" aria-pressed="false" data-i18n="usage.range.30d">30 days</button>
+          </div>
+        </div>
+        <button type="button" class="btn-ghost usage-toolbar__refresh" id="usage-refresh" data-i18n="usage.refresh">Refresh</button>
+      </section>
+
+      <div class="usage-unavailable hidden" id="usage-unavailable" role="status" data-i18n="usage.unavailable">The authoritative usage ledger is unavailable. Configured limits remain visible; zeroes are not fabricated.</div>
+
+      <div class="grid grid--kpi mb-2">
+        <div class="kpi kpi--trace">
+          <div class="kpi__label" data-i18n="usage.kpi.spend">Spend</div>
+          <div class="kpi__value" id="usage-total-spend">—</div>
+          <div class="kpi__hint" data-i18n="usage.kpi.spend.hint">Authoritative USD ledger</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="usage.kpi.tokens">Tokens</div>
+          <div class="kpi__value" id="usage-total-tokens">—</div>
+          <div class="kpi__hint" data-i18n="usage.kpi.tokens.hint">Prompt + completion</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="usage.kpi.requests">Requests</div>
+          <div class="kpi__value" id="usage-total-requests">—</div>
+          <div class="kpi__hint" data-i18n="usage.kpi.requests.hint">Completed gateway calls</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="usage.kpi.latest">Last activity</div>
+          <div class="kpi__value kpi__value--time" id="usage-latest">—</div>
+          <div class="kpi__hint" data-i18n="usage.kpi.latest.hint">Most recent billed request</div>
+        </div>
+      </div>
+
+      <section class="card usage-chart-card">
+        <div class="card__head usage-card-head">
+          <div>
+            <h2 class="card__title" data-i18n="usage.chart.title">Metered activity</h2>
+            <p class="card__hint" data-i18n="usage.chart.hint">Spend is the coral trace; token volume is shown as bars.</p>
+          </div>
+          <div class="usage-legend" aria-hidden="true">
+            <span><i class="usage-legend__line"></i><span data-i18n="usage.chart.spend">Spend</span></span>
+            <span><i class="usage-legend__bar"></i><span data-i18n="usage.chart.tokens">Tokens</span></span>
+          </div>
+        </div>
+        <div class="usage-chart" id="usage-chart" role="img" data-i18n-title="usage.chart.title" title="Metered activity"></div>
+      </section>
+
+      <section class="card">
+        <div class="card__head usage-card-head">
+          <div>
+            <h2 class="card__title" data-i18n="usage.quota.title">Quota runway</h2>
+            <p class="card__hint" data-i18n="usage.quota.hint">Current 5-hour, 7-day, and 30-day consumption against each active key's limits.</p>
+          </div>
+          <span class="pill pill--accent" data-i18n="usage.quota.enforced">Gateway enforced</span>
+        </div>
+        <div id="usage-quotas"></div>
+      </section>
+
+      <section class="card">
+        <div class="card__head usage-card-head">
+          <div>
+            <h2 class="card__title" data-i18n="usage.breakdown.title">Who used what</h2>
+            <p class="card__hint" data-i18n="usage.breakdown.hint">Device and model totals for the selected time range.</p>
+          </div>
+        </div>
+        <div id="usage-breakdown"></div>
+      </section>
+    </section>
+
     <!-- ENROLL -->
     <section class="view hidden" id="view-enroll" data-view="enroll">
       <div class="view__header">
@@ -273,7 +368,7 @@
           <div>
             <div class="field">
               <label class="field__label" for="ec-orgid" data-i18n="enroll.orgid">Org ID</label>
-              <input class="input input--mono" id="ec-orgid" type="text" data-i18n-placeholder="enroll.orgid.placeholder">
+              <input class="input input--mono" id="ec-orgid" type="text" list="org-options" data-i18n-placeholder="enroll.orgid.placeholder">
             </div>
             <div class="field">
               <label class="field__label" for="ec-model" data-i18n="enroll.model">Model alias</label>
@@ -483,6 +578,8 @@
 
   </main>
 </div>
+
+<datalist id="org-options"></datalist>
 
 <!-- ── MODAL HOST ─────────────────────────────────────────────────── -->
 <div id="modal-host"></div>

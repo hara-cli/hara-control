@@ -1,10 +1,19 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { GatewayAdapter, GatewayReadiness, IssuedKey, SpendRecord } from "./gateway-adapter";
+import {
+  GatewayAdapter,
+  GatewayReadiness,
+  GatewayRollingSpend,
+  GatewayUsageBucket,
+  GatewayUsageReport,
+  IssuedKey,
+  SpendRecord,
+} from "./gateway-adapter";
 import { safeFetch } from "../security/ssrf";
 import { GatewayKeyLimits } from "./key-policy";
 import { PrismaService } from "../prisma/prisma.service";
 import { allowedManagedModels } from "../providers/model-policy";
+import { UsageRange, usageWindow } from "./usage";
 
 /** LiteLLM accepts compact durations such as `20m`, `30d`, and `600s`. Floor to a whole
  * second so the data-plane token can never outlive the control-plane request boundary. */
@@ -103,6 +112,58 @@ export async function liteLLMSpendSchemaReady(query: () => Promise<unknown>): Pr
   } catch {
     return false;
   }
+}
+
+export function normalizeLiteLLMUsageRows(
+  rows: Array<{
+    keyId: unknown;
+    bucketAt: unknown;
+    model: unknown;
+    spend: unknown;
+    totalTokens: unknown;
+    requests: unknown;
+    lastRequestAt: unknown;
+  }>,
+): GatewayUsageBucket[] {
+  return rows.flatMap((row) => {
+    if (typeof row.keyId !== "string") return [];
+    const bucketAt = row.bucketAt instanceof Date ? row.bucketAt : new Date(String(row.bucketAt));
+    const lastRequestAt = row.lastRequestAt instanceof Date
+      ? row.lastRequestAt
+      : new Date(String(row.lastRequestAt));
+    const spend = Number(row.spend);
+    const totalTokens = Number(row.totalTokens);
+    const requests = Number(row.requests);
+    if (
+      !Number.isFinite(bucketAt.getTime()) ||
+      !Number.isFinite(lastRequestAt.getTime()) ||
+      !Number.isFinite(spend) ||
+      !Number.isFinite(totalTokens) ||
+      !Number.isFinite(requests)
+    ) return [];
+    return [{
+      keyId: row.keyId,
+      bucketAt,
+      model: typeof row.model === "string" ? row.model : "",
+      spend,
+      totalTokens,
+      requests,
+      lastRequestAt,
+    }];
+  });
+}
+
+export function normalizeLiteLLMRollingRows(
+  rows: Array<{ keyId: unknown; spend5h: unknown; spend7d: unknown; spend30d: unknown }>,
+): GatewayRollingSpend[] {
+  return rows.flatMap((row) => {
+    if (typeof row.keyId !== "string") return [];
+    const spend5h = Number(row.spend5h);
+    const spend7d = Number(row.spend7d);
+    const spend30d = Number(row.spend30d);
+    if (![spend5h, spend7d, spend30d].every(Number.isFinite)) return [];
+    return [{ keyId: row.keyId, spend5h, spend7d, spend30d }];
+  });
 }
 
 function isPositivePrice(value: unknown): boolean {
@@ -277,6 +338,75 @@ export class LiteLLMAdapter implements GatewayAdapter {
     }
   }
 
+  async usage(keyIds: string[], range: UsageRange, now = new Date()): Promise<GatewayUsageReport> {
+    if (!keyIds.length) return { available: true, buckets: [], rolling: [] };
+    const window = usageWindow(range, now);
+    const bucketExpression = window.bucketUnit === "hour"
+      ? Prisma.sql`date_trunc('hour', l."endTime")`
+      : Prisma.sql`date_trunc('day', l."endTime")`;
+    const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60_000);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60_000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60_000);
+    try {
+      const [bucketRows, rollingRows] = await Promise.all([
+        this.prisma.$queryRaw<Array<{
+          keyId: unknown;
+          bucketAt: unknown;
+          model: unknown;
+          spend: unknown;
+          totalTokens: unknown;
+          requests: unknown;
+          lastRequestAt: unknown;
+        }>>(
+          Prisma.sql`
+            SELECT v."key_alias" AS "keyId",
+                   ${bucketExpression} AS "bucketAt",
+                   COALESCE(NULLIF(l."model_group", ''), NULLIF(l."model", ''), '') AS "model",
+                   COALESCE(SUM(l."spend"), 0)::double precision AS "spend",
+                   COALESCE(SUM(l."total_tokens"), 0)::double precision AS "totalTokens",
+                   COUNT(l."request_id")::int AS "requests",
+                   MAX(l."endTime") AS "lastRequestAt"
+              FROM "litellm"."LiteLLM_VerificationToken" v
+              JOIN "litellm"."LiteLLM_SpendLogs" l ON l."api_key" = v."token"
+             WHERE v."key_alias" IN (${Prisma.join(keyIds)})
+               AND l."endTime" >= ${window.from}
+               AND l."endTime" < ${window.to}
+             GROUP BY 1, 2, 3
+             ORDER BY 2 ASC
+          `,
+        ),
+        this.prisma.$queryRaw<Array<{
+          keyId: unknown;
+          spend5h: unknown;
+          spend7d: unknown;
+          spend30d: unknown;
+        }>>(
+          Prisma.sql`
+            SELECT v."key_alias" AS "keyId",
+                   COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= ${fiveHoursAgo}), 0)::double precision AS "spend5h",
+                   COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= ${sevenDaysAgo}), 0)::double precision AS "spend7d",
+                   COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= ${thirtyDaysAgo}), 0)::double precision AS "spend30d"
+              FROM "litellm"."LiteLLM_VerificationToken" v
+              LEFT JOIN "litellm"."LiteLLM_SpendLogs" l
+                ON l."api_key" = v."token"
+               AND l."endTime" >= ${thirtyDaysAgo}
+               AND l."endTime" < ${window.to}
+             WHERE v."key_alias" IN (${Prisma.join(keyIds)})
+             GROUP BY v."key_alias"
+          `,
+        ),
+      ]);
+      return {
+        available: true,
+        buckets: normalizeLiteLLMUsageRows(bucketRows),
+        rolling: normalizeLiteLLMRollingRows(rollingRows),
+      };
+    } catch {
+      this.log.warn("LiteLLM usage ledger unavailable; admin usage will expose unavailable instead of fake zeroes");
+      return { available: false, buckets: [], rolling: [] };
+    }
+  }
+
   async readiness(): Promise<GatewayReadiness> {
     try {
       const controller = new AbortController();
@@ -296,8 +426,10 @@ export class LiteLLMAdapter implements GatewayAdapter {
           liteLLMSpendSchemaReady(() =>
             this.prisma.$queryRaw(
               Prisma.sql`
-                SELECT "key_alias", "spend"
-                  FROM "litellm"."LiteLLM_VerificationToken"
+                SELECT v."key_alias", v."spend", l."request_id", l."spend", l."total_tokens",
+                       l."endTime", l."model", l."model_group"
+                  FROM "litellm"."LiteLLM_VerificationToken" v
+                  LEFT JOIN "litellm"."LiteLLM_SpendLogs" l ON FALSE
                  WHERE FALSE
               `,
             ),

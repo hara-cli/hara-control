@@ -168,7 +168,7 @@ docker run -d --name hara-control -p 4100:4100 \
   -e HARA_KMS_KEYFILE=/run/hara-secrets/kms-master.key \
   -v "$PWD/secrets/kms-master.key:/run/hara-secrets/kms-master.key:ro" \
   -e GATEWAY_ADAPTER=mock \
-  ghcr.io/hara-cli/hara-control:0.1.11
+  ghcr.io/hara-cli/hara-control:0.1.12
 ```
 
 Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database>?schema=public`.
@@ -187,12 +187,13 @@ Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database
   end-to-end (see [`phase0/`](./phase0/)).
 - **Phase 1 — MVP: ✅ implemented.** NestJS + Prisma + Postgres. Endpoints: `POST /v1/enroll`,
   `POST /v1/heartbeat` (device-facing, matches the CLI contract); `POST /admin/orgs`,
-  `POST /admin/enroll-codes`, `GET /admin/fleet`, `POST /admin/devices/:id/revoke` (admin-key gated).
+  `POST /admin/enroll-codes`, `GET /admin/fleet`, `GET /admin/usage`,
+  `POST /admin/devices/:id/revoke` (admin-gated).
   Device tokens are gateway virtual keys behind the `GatewayAdapter` seam (LiteLLM in prod, an
   in-process mock for dev/test); only token **hashes** are stored. Production includes readiness,
   atomic one-time enrollment, data-plane TTL/model scoping, encrypted DeepSeek source-of-truth and a
-  pinned LiteLLM runtime. **Pending hardening:** non-owner/forced RLS, external KMS adapters, signed
-  audit checkpoints and live spend-cap wiring.
+  pinned LiteLLM runtime, enforced rolling spend limits, and organization-scoped usage charts.
+  **Pending hardening:** non-owner/forced RLS, external KMS adapters, and signed audit checkpoints.
 
 ### Run Phase 1 locally
 

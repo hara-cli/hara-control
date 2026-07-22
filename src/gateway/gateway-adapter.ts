@@ -4,6 +4,7 @@
 // never touching the control plane or clients.
 
 import type { GatewayKeyLimits } from "./key-policy";
+import type { UsageRange } from "./usage";
 
 export interface IssuedKey {
   /** the gateway virtual key — returned to the device as its device token, never stored raw */
@@ -24,6 +25,30 @@ export interface GatewayReadiness {
   ok: boolean;
 }
 
+export interface GatewayUsageBucket {
+  keyId: string;
+  bucketAt: Date;
+  model: string;
+  spend: number;
+  totalTokens: number;
+  requests: number;
+  lastRequestAt: Date;
+}
+
+export interface GatewayRollingSpend {
+  keyId: string;
+  spend5h: number;
+  spend7d: number;
+  spend30d: number;
+}
+
+export interface GatewayUsageReport {
+  /** false means the authoritative ledger was unavailable; callers must not render fake zeroes. */
+  available: boolean;
+  buckets: GatewayUsageBucket[];
+  rolling: GatewayRollingSpend[];
+}
+
 export interface GatewayAdapter {
   issueKey(opts: {
     model: string;
@@ -34,6 +59,7 @@ export interface GatewayAdapter {
   }): Promise<IssuedKey>;
   revokeKey(keyId: string): Promise<void>;
   listSpend(keyIds: string[]): Promise<SpendRecord[]>;
+  usage(keyIds: string[], range: UsageRange, now?: Date): Promise<GatewayUsageReport>;
   /**
    * Cheap read-only readiness. It must verify the key-management data path without issuing a
    * provider completion, exposing upstream details, or creating/revoking credentials.

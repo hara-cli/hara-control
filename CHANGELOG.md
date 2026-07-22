@@ -4,12 +4,20 @@ All notable changes to hara-control are documented in this file.
 
 ## 0.1.12 - 2026-07-23
 
+### Added
+
+- Add an organization-scoped admin usage dashboard with 24-hour, 7-day, and 30-day spend/token/request
+  charts, per-device/model breakdowns, and live 5-hour / weekly / monthly quota progress.
+- Let administrators create enrollment codes in the console with explicit key lifetime, USD budgets,
+  RPM, and TPM limits; configured limits remain visible when the authoritative ledger is unavailable.
+
 ### Fixed
 
 - Configure explicit official DeepSeek V4 Flash/Pro input, output, and cache-read prices so successful
   requests record positive USD spend and rolling 5-hour / 7-day / 30-day budgets can decrement.
 - Refuse to issue USD-limited keys when a selected LiteLLM model has missing or zero pricing, include
   managed-model pricing in readiness, and gate production deployment on a temporary paid spend probe.
+- Send the documented `parentId` field when creating a nested organization from the admin console.
 
 ## 0.1.8 - 2026-07-22
 

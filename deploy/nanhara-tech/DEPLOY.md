@@ -97,6 +97,9 @@ bundle into `~/.hara/org-roles/` (the 0.70 feature) — verify with `hara roles`
 - **R1:** use the console Fleet view and confirm the enrolled device becomes `online`.
 - **R2/R3:** set `GATEWAY_ADAPTER=litellm`, re-run the deployment, require `/health/ready`=200, test
   both the encrypted and active DeepSeek credential in Security, then verify a normal Hara request.
+- **Metering:** open **Usage**, select the organization and confirm that the paid request increases
+  spend, tokens, requests, and the configured 5-hour / 7-day / 30-day quota progress. An unavailable
+  ledger must render as unavailable rather than `$0.00`.
 
 ## 7. Security caveats (recap)
 - Use only a provider key whose terms permit server/gateway use.

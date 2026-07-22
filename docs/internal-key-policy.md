@@ -77,6 +77,13 @@ The fleet response includes `spend_available`. A real zero is returned as `spend
 `$0.00`. Production readiness also checks that the isolated alias/spend columns are readable, so schema
 or permission drift fails closed before a deployment is declared healthy.
 
+The console's **Usage** view reads `GET /admin/usage?orgId=<id>&range=24h|7d|30d`. It displays the
+authoritative USD spend, prompt-plus-completion tokens, request counts, last activity, device/model
+breakdowns, and active-key quota progress. The query selects only parameterized aliases and aggregates
+from LiteLLM's isolated ledger; it never returns raw virtual keys, prompts, responses, authorization
+headers, or requester IP addresses. An organization-scoped admin can only read its assigned organization.
+If the ledger query fails, totals and charts become unavailable while configured limits remain visible.
+
 Production readiness also checks positive pricing for every managed model. The deployment gate performs a
 minimal paid request with a temporary virtual key and requires both a spend-log row and positive recorded USD
 spend before declaring the release healthy; the temporary key is deleted even if the check fails.

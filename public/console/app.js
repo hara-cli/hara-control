@@ -3,7 +3,7 @@
  *
  * Single-page console. No framework, no build. Responsibilities:
  *   1. i18n engine  — three dicts loaded as window.HARA_I18N.{en,zh-CN,zh-TW}.
- *   2. Hash router  — six views (overview/orgs/fleet/enroll/users/security).
+ *   2. Hash router  — seven views (overview/orgs/fleet/usage/enroll/users/security).
  *   3. Auth flow    — email+password → optional TOTP code → JWT (8h).
  *   4. API client   — every endpoint from _legacy_index.html, contract-identical.
  *   5. QR codes     — window.HaraQR.toSvg() called for the 2FA enrollment view.
@@ -125,6 +125,18 @@
     } catch { return String(iso); }
   }
 
+  function formatMoney(value) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return "—";
+    const digits = amount !== 0 && Math.abs(amount) < 0.01 ? 6 : 2;
+    return `$${amount.toLocaleString(I18N.current, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+  }
+
+  function formatCount(value) {
+    const count = Number(value);
+    return Number.isFinite(count) ? count.toLocaleString(I18N.current, { maximumFractionDigits: 0 }) : "—";
+  }
+
   async function copyText(text) {
     try {
       if (navigator.clipboard && window.isSecureContext) {
@@ -197,6 +209,46 @@
     return data;
   }
 
+  let orgChoices = null;
+  let orgChoicesPromise = null;
+
+  function paintOrgChoices() {
+    if (!Array.isArray(orgChoices)) return;
+    const datalist = $("#org-options");
+    datalist.innerHTML = orgChoices.map((org) =>
+      `<option value="${escapeHtml(org.id)}" label="${escapeHtml(org.name)}"></option>`).join("");
+
+    const select = $("#usage-orgid");
+    const previous = select.value;
+    select.innerHTML = `<option value="">${escapeHtml(I18N.t("usage.org.choose"))}</option>` +
+      orgChoices.map((org) =>
+        `<option value="${escapeHtml(org.id)}">${escapeHtml(org.name)} · ${escapeHtml(org.type)}</option>`).join("");
+    const preferred = previous || (me && me.orgId) || (orgChoices.length === 1 ? orgChoices[0].id : "");
+    if (preferred && orgChoices.some((org) => org.id === preferred)) select.value = preferred;
+    if (me && me.orgId) {
+      if (!$("#fleet-orgid").value) $("#fleet-orgid").value = me.orgId;
+      if (!$("#ec-orgid").value) $("#ec-orgid").value = me.orgId;
+    }
+  }
+
+  async function getOrgChoices(force = false) {
+    if (force) {
+      orgChoices = null;
+      orgChoicesPromise = null;
+    }
+    if (orgChoices) return orgChoices;
+    if (!orgChoicesPromise) {
+      orgChoicesPromise = api("GET", "/admin/orgs")
+        .then((rows) => {
+          orgChoices = Array.isArray(rows) ? rows : [];
+          paintOrgChoices();
+          return orgChoices;
+        })
+        .finally(() => { orgChoicesPromise = null; });
+    }
+    return orgChoicesPromise;
+  }
+
   // ╔═══════════════════════════════════════════════════════════════════╗
   // ║ 5.  screen toggles + boot                                         ║
   // ╚═══════════════════════════════════════════════════════════════════╝
@@ -230,6 +282,7 @@
       }
 
       showApp();
+      getOrgChoices().catch(() => undefined);
       router.dispatch();   // honour whatever hash the user landed on
     } catch (e) {
       showLogin();
@@ -289,7 +342,7 @@
   // ║ 7.  hash router                                                   ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   const router = (() => {
-    const ROUTES = ["overview", "orgs", "fleet", "enroll", "users", "security"];
+    const ROUTES = ["overview", "orgs", "fleet", "usage", "enroll", "users", "security"];
     const handlers = {};   // optional onEnter hooks per view
 
     let last = null;
@@ -341,11 +394,13 @@
   window.__rerenderCurrentView = () => {
     const r = router.current;
     if (r === "fleet" && lastFleetRows) renderFleet();
+    if (r === "usage" && lastUsageReport) renderUsage(lastUsageReport);
     if (r === "users") loadUsers();
     if (r === "orgs" && lastInspectId) inspectOrg(lastInspectId);
     if (r === "enroll" && lastEnrollResult) paintEnrollResult(lastEnrollResult);
     if (r === "overview") refreshOverview();
     if (r === "security" && me && me.role === "SUPERADMIN") loadProviderStatus();
+    paintOrgChoices();
     // login + the remaining security copy is data-i18n-driven so apply() handles it
   };
 
@@ -386,15 +441,16 @@
   $("#org-create").addEventListener("click", async () => {
     const name = $("#org-name").value.trim();
     const type = $("#org-type").value;
-    const parentOrgId = $("#org-parent").value.trim() || undefined;
+    const parentId = $("#org-parent").value.trim() || undefined;
     if (!name) { toast(I18N.t("err.name_required"), "err"); return; }
     try {
-      const body = parentOrgId ? { name, type, parentOrgId } : { name, type };
+      const body = parentId ? { name, type, parentId } : { name, type };
       const org = await api("POST", "/admin/orgs", body);
       $("#org-create-out").innerHTML =
         `<span class="small">${escapeHtml(I18N.t("orgs.new.created"))}:</span> <code class="pill">${escapeHtml(org.id)}</code>`;
       $("#org-name").value = "";
       $("#org-parent").value = "";
+      getOrgChoices(true).catch(() => undefined);
       toast(I18N.t("ok.org_created"), "ok");
     } catch (e) { toast(e.message, "err"); }
   });
@@ -583,7 +639,206 @@
   }
 
   // ╔═══════════════════════════════════════════════════════════════════╗
-  // ║ 11.  Enroll codes                                                 ║
+  // ║ 11.  Usage + quota flight recorder                                ║
+  // ╚═══════════════════════════════════════════════════════════════════╝
+  let usageRange = "24h";
+  let lastUsageReport = null;
+  let usageRequestId = 0;
+
+  router.on("usage", async () => {
+    try {
+      const orgs = await getOrgChoices();
+      const select = $("#usage-orgid");
+      if (!select.value && orgs.length) select.value = (me && me.orgId) || orgs[0].id;
+      if (select.value) loadUsage();
+      else renderUsagePrompt();
+    } catch (error) {
+      toast(error.message, "err");
+      renderUsagePrompt();
+    }
+  });
+
+  $("#usage-refresh").addEventListener("click", loadUsage);
+  $("#usage-orgid").addEventListener("change", loadUsage);
+  $$('[data-usage-range]').forEach((button) => {
+    button.addEventListener("click", () => {
+      usageRange = button.getAttribute("data-usage-range");
+      $$('[data-usage-range]').forEach((candidate) => {
+        const active = candidate === button;
+        candidate.classList.toggle("segmented__item--active", active);
+        candidate.setAttribute("aria-pressed", String(active));
+      });
+      loadUsage();
+    });
+  });
+
+  function renderUsagePrompt() {
+    lastUsageReport = null;
+    $("#usage-total-spend").textContent = "—";
+    $("#usage-total-tokens").textContent = "—";
+    $("#usage-total-requests").textContent = "—";
+    $("#usage-latest").textContent = "—";
+    $("#usage-updated").textContent = "—";
+    $("#usage-unavailable").classList.add("hidden");
+    $("#usage-chart").innerHTML = `<div class="empty">${escapeHtml(I18N.t("usage.empty.choose_org"))}</div>`;
+    $("#usage-quotas").innerHTML = `<div class="empty empty--inline">${escapeHtml(I18N.t("usage.empty.choose_org"))}</div>`;
+    $("#usage-breakdown").innerHTML = `<div class="empty empty--inline">${escapeHtml(I18N.t("usage.empty.choose_org"))}</div>`;
+  }
+
+  async function loadUsage() {
+    const orgId = $("#usage-orgid").value;
+    if (!orgId) { renderUsagePrompt(); return; }
+    const requestId = ++usageRequestId;
+    $("#usage-refresh").disabled = true;
+    try {
+      const report = await api("GET", `/admin/usage?orgId=${encodeURIComponent(orgId)}&range=${encodeURIComponent(usageRange)}`);
+      if (requestId !== usageRequestId) return;
+      lastUsageReport = report;
+      renderUsage(report);
+    } catch (error) {
+      if (requestId === usageRequestId) toast(error.message, "err");
+    } finally {
+      if (requestId === usageRequestId) $("#usage-refresh").disabled = false;
+    }
+  }
+
+  function renderUsage(report) {
+    const available = report && report.available === true;
+    const totals = report && report.totals ? report.totals : {};
+    $("#usage-unavailable").classList.toggle("hidden", available);
+    $("#usage-total-spend").textContent = available ? formatMoney(totals.spend) : "—";
+    $("#usage-total-tokens").textContent = available ? formatCount(totals.totalTokens) : "—";
+    $("#usage-total-requests").textContent = available ? formatCount(totals.requests) : "—";
+    $("#usage-latest").textContent = available ? formatDateTime(totals.latestRequestAt) : "—";
+    $("#usage-updated").textContent = I18N.t("usage.updated", { time: formatDateTime(new Date()) });
+    renderUsageChart(report);
+    renderUsageQuotas(report && report.quotas);
+    renderUsageBreakdown(report && report.breakdown, available);
+  }
+
+  function chartTimeLabel(value, range) {
+    const date = new Date(value);
+    const options = range === "24h"
+      ? { hour: "2-digit", minute: "2-digit" }
+      : { month: "2-digit", day: "2-digit" };
+    return new Intl.DateTimeFormat(I18N.current, options).format(date);
+  }
+
+  function renderUsageChart(report) {
+    const host = $("#usage-chart");
+    const series = report && report.available === true && Array.isArray(report.series) ? report.series : [];
+    if (!series.length) {
+      host.innerHTML = `<div class="empty">${escapeHtml(report && report.available === false
+        ? I18N.t("usage.unavailable")
+        : I18N.t("usage.empty.no_activity"))}</div>`;
+      return;
+    }
+    const width = 960;
+    const height = 280;
+    const margin = { top: 18, right: 18, bottom: 34, left: 58 };
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
+    const spends = series.map((row) => Math.max(0, Number(row.spend) || 0));
+    const tokens = series.map((row) => Math.max(0, Number(row.totalTokens) || 0));
+    const maxSpend = Math.max(...spends, 0);
+    const maxTokens = Math.max(...tokens, 0);
+    const x = (index) => margin.left + (series.length === 1 ? plotWidth / 2 : index * plotWidth / (series.length - 1));
+    const spendY = (value) => margin.top + plotHeight - (maxSpend > 0 ? value / maxSpend * plotHeight * .88 : 0);
+    const tokenY = (value) => margin.top + plotHeight - (maxTokens > 0 ? value / maxTokens * plotHeight * .72 : 0);
+    const grid = Array.from({ length: 5 }, (_, index) => {
+      const ratio = index / 4;
+      const y = margin.top + ratio * plotHeight;
+      const label = formatMoney(maxSpend * (1 - ratio));
+      return `<line class="usage-chart__grid" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}"/>` +
+        `<text class="usage-chart__axis" x="${margin.left - 8}" y="${y + 3}" text-anchor="end">${escapeHtml(label)}</text>`;
+    }).join("");
+    const barStep = plotWidth / Math.max(series.length, 1);
+    const barWidth = Math.max(3, Math.min(18, barStep * .48));
+    const bars = series.map((row, index) => {
+      const top = tokenY(tokens[index]);
+      const bottom = margin.top + plotHeight;
+      const title = `${chartTimeLabel(row.at, report.range)} · ${formatCount(tokens[index])} ${I18N.t("usage.chart.tokens").toLowerCase()}`;
+      return `<rect class="usage-chart__bar" x="${x(index) - barWidth / 2}" y="${top}" width="${barWidth}" height="${Math.max(0, bottom - top)}"><title>${escapeHtml(title)}</title></rect>`;
+    }).join("");
+    const points = series.map((row, index) => `${x(index)},${spendY(spends[index])}`).join(" ");
+    const area = `${margin.left},${margin.top + plotHeight} ${points} ${width - margin.right},${margin.top + plotHeight}`;
+    const markers = series.map((row, index) => {
+      if (!spends[index]) return "";
+      const title = `${chartTimeLabel(row.at, report.range)} · ${formatMoney(spends[index])} · ${formatCount(row.requests)} ${I18N.t("usage.kpi.requests").toLowerCase()}`;
+      return `<circle class="usage-chart__point" cx="${x(index)}" cy="${spendY(spends[index])}" r="3"><title>${escapeHtml(title)}</title></circle>`;
+    }).join("");
+    const labelStep = report.range === "24h" ? 4 : report.range === "7d" ? 1 : 5;
+    const labels = series.map((row, index) => {
+      if (index % labelStep !== 0 && index !== series.length - 1) return "";
+      return `<text class="usage-chart__axis" x="${x(index)}" y="${height - 10}" text-anchor="middle">${escapeHtml(chartTimeLabel(row.at, report.range))}</text>`;
+    }).join("");
+    const emptyLabel = maxSpend === 0 && maxTokens === 0
+      ? `<text class="usage-chart__empty" x="${margin.left + plotWidth / 2}" y="${margin.top + plotHeight / 2}" text-anchor="middle">${escapeHtml(I18N.t("usage.empty.no_activity"))}</text>`
+      : "";
+    host.innerHTML = `<svg viewBox="0 0 ${width} ${height}" aria-hidden="true">
+      <defs><linearGradient id="usage-spend-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff6b5c" stop-opacity=".22"/><stop offset="1" stop-color="#ff6b5c" stop-opacity="0"/></linearGradient></defs>
+      ${grid}${bars}<polygon class="usage-chart__area" points="${area}"/><polyline class="usage-chart__line" points="${points}"/>${markers}${labels}${emptyLabel}
+    </svg>`;
+  }
+
+  function renderUsageQuotas(quotas) {
+    const host = $("#usage-quotas");
+    if (!Array.isArray(quotas) || !quotas.length) {
+      host.innerHTML = `<div class="empty empty--inline">${escapeHtml(I18N.t("usage.empty.no_quotas"))}</div>`;
+      return;
+    }
+    host.innerHTML = `<div class="usage-quota-list">${quotas.map((quota) => {
+      const meters = Array.isArray(quota.limits) ? quota.limits.map((limit) => {
+        const percent = Number(limit.percent);
+        const safePercent = Number.isFinite(percent) ? Math.max(0, percent) : null;
+        const barPercent = safePercent == null ? 0 : Math.min(100, safePercent);
+        const level = safePercent == null ? "" : safePercent >= 95 ? " usage-meter__fill--critical" : safePercent >= 80 ? " usage-meter__fill--warn" : "";
+        const value = limit.usedUsd == null
+          ? I18N.t("usage.quota.unavailable")
+          : I18N.t("usage.quota.value", {
+              used: formatMoney(limit.usedUsd),
+              max: formatMoney(limit.maxUsd),
+              percent: safePercent.toFixed(1),
+            });
+        return `<div class="usage-meter">
+          <div class="usage-meter__head"><span class="usage-meter__label">${escapeHtml(I18N.t(`enroll.policy.window.${limit.window}`))}</span><span class="usage-meter__value">${escapeHtml(value)}</span></div>
+          <div class="usage-meter__track"><div class="usage-meter__fill${level}" style="width:${barPercent}%"></div></div>
+        </div>`;
+      }).join("") : "";
+      const rates = [
+        quota.rpmLimit ? `<span class="pill pill--muted">${escapeHtml(`${quota.rpmLimit} RPM`)}</span>` : "",
+        quota.tpmLimit ? `<span class="pill pill--muted">${escapeHtml(`${formatCount(quota.tpmLimit)} TPM`)}</span>` : "",
+      ].join("");
+      return `<article class="usage-quota">
+        <div class="usage-quota__identity">
+          <div class="usage-quota__name">${escapeHtml(quota.principal || quota.deviceName || "—")}</div>
+          <div class="usage-quota__meta">${escapeHtml(quota.deviceName || "—")} · ${escapeHtml(quota.model || "—")}</div>
+          <div class="usage-quota__meta">${escapeHtml(I18N.t("usage.quota.expires", { date: formatDateTime(quota.expiresAt) }))}</div>
+          ${rates ? `<div class="usage-rate-pills">${rates}</div>` : ""}
+        </div>
+        <div class="usage-quota__meters">${meters || `<span class="small">${escapeHtml(I18N.t("usage.quota.rate_only"))}</span>`}</div>
+      </article>`;
+    }).join("")}</div>`;
+  }
+
+  function renderUsageBreakdown(rows, available) {
+    const host = $("#usage-breakdown");
+    if (!available) {
+      host.innerHTML = `<div class="empty empty--inline">${escapeHtml(I18N.t("usage.unavailable"))}</div>`;
+      return;
+    }
+    if (!Array.isArray(rows) || !rows.length) {
+      host.innerHTML = `<div class="empty empty--inline">${escapeHtml(I18N.t("usage.empty.no_activity"))}</div>`;
+      return;
+    }
+    host.innerHTML = `<div class="table-wrap"><table class="table">
+      <thead><tr><th>${escapeHtml(I18N.t("usage.col.person"))}</th><th>${escapeHtml(I18N.t("usage.col.device"))}</th><th>${escapeHtml(I18N.t("usage.col.model"))}</th><th class="num">${escapeHtml(I18N.t("usage.col.spend"))}</th><th class="num">${escapeHtml(I18N.t("usage.col.tokens"))}</th><th class="num">${escapeHtml(I18N.t("usage.col.requests"))}</th><th>${escapeHtml(I18N.t("usage.col.last"))}</th></tr></thead>
+      <tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.principal || "—")}</td><td>${escapeHtml(row.deviceName || "—")}</td><td><span class="pill pill--muted">${escapeHtml(row.model || "—")}</span></td><td class="num">${escapeHtml(formatMoney(row.spend))}</td><td class="num">${escapeHtml(formatCount(row.totalTokens))}</td><td class="num">${escapeHtml(formatCount(row.requests))}</td><td class="mono">${escapeHtml(formatDateTime(row.lastRequestAt))}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+  }
+
+  // ╔═══════════════════════════════════════════════════════════════════╗
+  // ║ 12.  Enroll codes                                                 ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   let lastEnrollResult = null;
 
@@ -680,7 +935,7 @@
   }
 
   // ╔═══════════════════════════════════════════════════════════════════╗
-  // ║ 12.  Users (SUPERADMIN only)                                      ║
+  // ║ 13.  Users (SUPERADMIN only)                                      ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   router.on("users", loadUsers);
 

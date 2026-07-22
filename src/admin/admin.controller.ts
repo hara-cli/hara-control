@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { AdminRole } from "@prisma/client";
 import { AdminService } from "./admin.service";
-import { AdminAuthGuard } from "../common/admin-auth.guard";
+import { AdminAuthGuard, assertAdminOrgAccess, AuthedUser } from "../common/admin-auth.guard";
 import { CreateEnrollCodeDto, CreateOrgDto } from "../protocol/dto";
 
 // Operator-facing endpoints — gated by AdminAuthGuard (JWT OR back-compat x-admin-key).
@@ -13,6 +14,12 @@ export class AdminController {
   @Post("orgs")
   createOrg(@Body() dto: CreateOrgDto) {
     return this.admin.createOrg(dto.name, dto.type, dto.parentId);
+  }
+
+  @Get("orgs")
+  listOrgs(@Req() req: { user?: AuthedUser }) {
+    const user = req.user!;
+    return this.admin.listOrgs(user.role === AdminRole.SUPERADMIN || user.viaSharedKey ? undefined : user.orgId);
   }
 
   /** Ancestor chain (leaf-first: [self … root]) for an org unit — where it sits in the hierarchy. */
@@ -28,7 +35,8 @@ export class AdminController {
   }
 
   @Post("enroll-codes")
-  createEnrollCode(@Body() dto: CreateEnrollCodeDto) {
+  createEnrollCode(@Req() req: { user?: AuthedUser }, @Body() dto: CreateEnrollCodeDto) {
+    assertAdminOrgAccess(req.user!, dto.orgId);
     return this.admin.createEnrollCode(
       dto.orgId,
       dto.model,
@@ -45,18 +53,30 @@ export class AdminController {
   }
 
   @Get("fleet")
-  fleet(@Query("orgId") orgId: string) {
+  fleet(@Req() req: { user?: AuthedUser }, @Query("orgId") orgId: string) {
+    assertAdminOrgAccess(req.user!, orgId);
     return this.admin.fleet(orgId);
   }
 
+  @Get("usage")
+  usage(
+    @Req() req: { user?: AuthedUser },
+    @Query("orgId") orgId: string,
+    @Query("range") range?: string,
+  ) {
+    assertAdminOrgAccess(req.user!, orgId);
+    return this.admin.usage(orgId, range);
+  }
+
   @Post("devices/:id/revoke")
-  revoke(@Param("id") id: string) {
-    return this.admin.revokeDevice(id);
+  revoke(@Req() req: { user?: AuthedUser }, @Param("id") id: string) {
+    return this.admin.revokeDevice(id, req.user!);
   }
 
   /** Verify the org's tamper-evident audit hash chain (compliance integrity check). */
   @Get("audit/verify")
-  verifyAudit(@Query("orgId") orgId: string) {
+  verifyAudit(@Req() req: { user?: AuthedUser }, @Query("orgId") orgId: string) {
+    assertAdminOrgAccess(req.user!, orgId);
     return this.admin.verifyAudit(orgId);
   }
 }

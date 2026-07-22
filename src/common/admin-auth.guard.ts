@@ -39,6 +39,15 @@ export interface AuthedUser {
   viaSharedKey?: boolean;
 }
 
+/** SUPERADMIN/shared-key operators may select any tenant. An org-scoped ADMIN may only operate on
+ * the organization assigned to their account; route handlers call this before accepting org ids. */
+export function assertAdminOrgAccess(user: AuthedUser, orgId: string): void {
+  if (user.viaSharedKey || user.role === AdminRole.SUPERADMIN) return;
+  if (!user.orgId || user.orgId !== orgId) {
+    throw new ForbiddenException("organization access denied");
+  }
+}
+
 @Injectable()
 export class AdminAuthGuard implements CanActivate {
   constructor(

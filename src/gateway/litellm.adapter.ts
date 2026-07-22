@@ -4,6 +4,7 @@ import { GatewayAdapter, GatewayReadiness, IssuedKey, SpendRecord } from "./gate
 import { safeFetch } from "../security/ssrf";
 import { GatewayKeyLimits } from "./key-policy";
 import { PrismaService } from "../prisma/prisma.service";
+import { allowedManagedModels } from "../providers/model-policy";
 
 /** LiteLLM accepts compact durations such as `20m`, `30d`, and `600s`. Floor to a whole
  * second so the data-plane token can never outlive the control-plane request boundary. */
@@ -104,6 +105,45 @@ export async function liteLLMSpendSchemaReady(query: () => Promise<unknown>): Pr
   }
 }
 
+function isPositivePrice(value: unknown): boolean {
+  const price = Number(value);
+  return Number.isFinite(price) && price > 0;
+}
+
+/** A USD budget cannot be enforced if LiteLLM prices a configured model at zero. Require every
+ * deployment behind each requested alias to have positive input and output prices; accepting one
+ * priced duplicate beside an unpriced duplicate would still leave an unmetered routing path. */
+export function liteLLMModelsHavePositivePricing(
+  response: Record<string, unknown>,
+  requiredModels: string[],
+): boolean {
+  if (!requiredModels.length || !Array.isArray(response.data)) return false;
+  const rows: unknown[] = response.data;
+  return [...new Set(requiredModels)].every((model) => {
+    const deployments = rows.filter((entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      return (entry as Record<string, unknown>).model_name === model;
+    });
+    return deployments.length > 0 && deployments.every((entry) => {
+      const modelInfo = (entry as Record<string, unknown>).model_info;
+      if (!modelInfo || typeof modelInfo !== "object") return false;
+      const pricing = modelInfo as Record<string, unknown>;
+      return isPositivePrice(pricing.input_cost_per_token) && isPositivePrice(pricing.output_cost_per_token);
+    });
+  });
+}
+
+export async function liteLLMModelPricingReady(
+  get: (path: string) => Promise<Record<string, unknown>>,
+  requiredModels: string[],
+): Promise<boolean> {
+  try {
+    return liteLLMModelsHavePositivePricing(await get("/model/info"), requiredModels);
+  } catch {
+    return false;
+  }
+}
+
 // Talks to the embedded LiteLLM proxy's admin API. The device token IS a LiteLLM virtual key scoped
 // to a model; the real provider key stays inside LiteLLM. We never store the raw key — revocation is
 // keyed off the alias we set (= the device id).
@@ -171,6 +211,12 @@ export class LiteLLMAdapter implements GatewayAdapter {
     metadata?: Record<string, unknown>;
     limits?: GatewayKeyLimits;
   }): Promise<IssuedKey> {
+    if (
+      limits?.budgetLimits.length &&
+      !(await liteLLMModelPricingReady((path) => this.get(path), [model]))
+    ) {
+      throw new Error("LiteLLM model pricing is unavailable; refusing to issue an unenforceable USD budget");
+    }
     const startedAt = new Date();
     let j: Record<string, unknown>;
     try {
@@ -245,7 +291,7 @@ export class LiteLLMAdapter implements GatewayAdapter {
           await res.body?.cancel().catch(() => undefined);
           return { ok: false };
         }
-        const [keyManagement, spendSchema] = await Promise.all([
+        const [keyManagement, spendSchema, modelPricing] = await Promise.all([
           liteLLMKeyManagementReady((path) => this.get(path)),
           liteLLMSpendSchemaReady(() =>
             this.prisma.$queryRaw(
@@ -256,8 +302,9 @@ export class LiteLLMAdapter implements GatewayAdapter {
               `,
             ),
           ),
+          liteLLMModelPricingReady((path) => this.get(path), allowedManagedModels()),
         ]);
-        return { ok: keyManagement && spendSchema };
+        return { ok: keyManagement && spendSchema && modelPricing };
       } finally {
         clearTimeout(timer);
       }

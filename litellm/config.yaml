@@ -10,6 +10,10 @@ model_list:
       # host/uvx: http://localhost:8899/v1 ; in Docker: http://host.docker.internal:8899/v1
       api_base: os.environ/HARA_MOCK_BASE
       api_key: mock-not-a-real-key
+    # Synthetic non-zero prices make the local budget/spend E2E exercise real metering behavior.
+    model_info:
+      input_cost_per_token: 0.000001
+      output_cost_per_token: 0.000001
 
   # ── Real upstream: DeepSeek (regular pay-as-you-go key in UPSTREAM_API_KEY; NOT a coding-plan sk-sp key) ──
   # OpenAI-compatible at https://api.deepseek.com/chat/completions (Bearer). Current models = V4
@@ -19,11 +23,20 @@ model_list:
       model: openai/deepseek-v4-flash
       api_base: https://api.deepseek.com
       api_key: os.environ/UPSTREAM_API_KEY
+    # DeepSeek V4 official USD/token pricing, checked 2026-07-22.
+    model_info:
+      input_cost_per_token: 0.00000014
+      output_cost_per_token: 0.00000028
+      cache_read_input_token_cost: 0.0000000028
   - model_name: deepseek-pro
     litellm_params:
       model: openai/deepseek-v4-pro
       api_base: https://api.deepseek.com
       api_key: os.environ/UPSTREAM_API_KEY
+    model_info:
+      input_cost_per_token: 0.000000435
+      output_cost_per_token: 0.00000087
+      cache_read_input_token_cost: 0.000000003625
 
 litellm_settings:
   drop_params: true

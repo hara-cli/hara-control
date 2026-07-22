@@ -53,12 +53,15 @@ consumed once.
 1. Hara Control validates and stores the normalized policy with the one-time code.
 2. Enrollment atomically claims the code and requests a model-scoped LiteLLM key with the exact expiry,
    three rolling budget windows, RPM, and TPM values.
-3. LiteLLM must return the authoritative expiry and confirm every requested limit. A missing, changed, or
+3. Before a USD-limited key is minted, Hara requires every LiteLLM deployment behind that model alias to
+   report positive input and output prices. Missing, zero, or unreadable pricing fails closed because a
+   dollar ceiling cannot be enforced against zero-cost accounting.
+4. LiteLLM must return the authoritative expiry and confirm every requested limit. A missing, changed, or
    malformed limit causes enrollment to fail closed; Hara Control revokes the possibly-created alias and
    restores the one-time code for a safe retry.
-4. The immutable policy is copied to `DeviceToken` and returned to the enrolling client. The fleet API and
+5. The immutable policy is copied to `DeviceToken` and returned to the enrolling client. The fleet API and
    admin console show expiry and configured limits without revealing the token.
-5. Expired keys are excluded from the active fleet view. Explicit device revoke invalidates the key in both
+6. Expired keys are excluded from the active fleet view. Explicit device revoke invalidates the key in both
    the control plane and LiteLLM.
 
 ## Fleet spend integrity
@@ -73,6 +76,10 @@ The fleet response includes `spend_available`. A real zero is returned as `spend
 `spend_available: false`. The console renders the latter as unavailable rather than a misleading
 `$0.00`. Production readiness also checks that the isolated alias/spend columns are readable, so schema
 or permission drift fails closed before a deployment is declared healthy.
+
+Production readiness also checks positive pricing for every managed model. The deployment gate performs a
+minimal paid request with a temporary virtual key and requires both a spend-log row and positive recorded USD
+spend before declaring the release healthy; the temporary key is deleted even if the check fails.
 
 Internal access policy is distinct from upstream provider-key management. Multiple encrypted upstream
 connections, key-pool routing, weights, and provider health are a separate control-plane feature; changing

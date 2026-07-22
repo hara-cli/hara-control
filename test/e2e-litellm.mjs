@@ -95,6 +95,19 @@ export async function run() {
   ok(/mock upstream/i.test(content), `gateway proxied to upstream (got: ${JSON.stringify(content)})`);
   console.log(`  · chat ok, upstream said: ${JSON.stringify(content)}`);
 
+  // Positive synthetic pricing on glm-mock proves budget accounting changes after a real request.
+  let spendRow;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    r = await adminReq(`/admin/fleet?orgId=${encodeURIComponent(org.id)}`, undefined, "GET");
+    ok(r.ok, `fleet spend refresh -> ${r.status}`);
+    const refreshed = await r.json();
+    spendRow = refreshed.find((candidate) => candidate.device_id === enr.device_id);
+    if (spendRow?.spend_available === true && Number(spendRow.spend) > 0) break;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 1_000));
+  }
+  ok(spendRow?.spend_available === true && Number(spendRow.spend) > 0, "priced chat records positive USD spend");
+  console.log("  · positive priced spend recorded");
+
   // revoke at the control plane -> propagates to the gateway
   r = await adminReq(`/admin/devices/${enr.device_id}/revoke`, {});
   ok(r.ok, `revoke -> ${r.status}`);

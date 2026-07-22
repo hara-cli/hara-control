@@ -98,6 +98,9 @@ if [ "$GATEWAY_MODE" = "litellm" ]; then
     sleep 2
   done
   [ "$litellm_ready" = "1" ] || { echo "✗ LiteLLM did not become live"; exit 1; }
+  echo "▶ verify priced request records positive USD spend"
+  node scripts/with-production-env.mjs "$APP_DIR/.env" -- \
+    "$NODE_BIN" "$APP_DIR/scripts/probe-litellm-priced-request.mjs"
 else
   # Switching away from the managed gateway must also remove the old provider-bearing runtime.
   pm2_clean delete "$LITELLM_PM2_NAME" >/dev/null 2>&1 || true

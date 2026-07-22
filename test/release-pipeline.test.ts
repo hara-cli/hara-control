@@ -91,3 +91,11 @@ test("RDS deploy synchronizes LiteLLM schema before startup and disables runtime
   assert.match(rdsDeploy, /DISABLE_SCHEMA_UPDATE=true/);
   assert.doesNotMatch(rdsDeploy, /--accept-data-loss/);
 });
+
+test("RDS deploy proves a paid request records spend before restarting Control", () => {
+  const liveAt = rdsDeploy.indexOf("litellm_ready=1");
+  const probeAt = rdsDeploy.indexOf("scripts/probe-litellm-priced-request.mjs");
+  const controlAt = rdsDeploy.indexOf('echo "▶ (re)start Nest via pm2');
+  assert.ok(liveAt >= 0 && probeAt > liveAt && controlAt > probeAt);
+  assert.match(rdsDeploy, /scripts\/with-production-env\.mjs "\$APP_DIR\/\.env"/);
+});

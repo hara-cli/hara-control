@@ -2,6 +2,15 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.12 - 2026-07-23
+
+### Fixed
+
+- Configure explicit official DeepSeek V4 Flash/Pro input, output, and cache-read prices so successful
+  requests record positive USD spend and rolling 5-hour / 7-day / 30-day budgets can decrement.
+- Refuse to issue USD-limited keys when a selected LiteLLM model has missing or zero pricing, include
+  managed-model pricing in readiness, and gate production deployment on a temporary paid spend probe.
+
 ## 0.1.8 - 2026-07-22
 
 ### Fixed

@@ -5,10 +5,25 @@ import {
   liteLLMKeyDuration,
   liteLLMKeyIssuePayload,
   liteLLMKeyManagementReady,
+  liteLLMModelPricingReady,
+  liteLLMModelsHavePositivePricing,
   liteLLMResponseConfirmsLimits,
   liteLLMSpendSchemaReady,
   normalizeLiteLLMSpendRows,
 } from "../src/gateway/litellm.adapter";
+
+const pricedModels = {
+  data: [
+    {
+      model_name: "deepseek-chat",
+      model_info: { input_cost_per_token: 0.00000014, output_cost_per_token: 0.00000028 },
+    },
+    {
+      model_name: "deepseek-pro",
+      model_info: { input_cost_per_token: 0.000000435, output_cost_per_token: 0.00000087 },
+    },
+  ],
+};
 
 test("liteLLMKeyDuration floors to seconds so the data-plane key does not outlive the requested boundary", () => {
   const now = new Date("2026-07-20T00:00:00.500Z");
@@ -48,6 +63,73 @@ test("LiteLLM spend schema readiness fails closed when the shared database path 
     }),
     false,
   );
+});
+
+test("LiteLLM model pricing requires every deployment behind every budgeted alias to be positive", async () => {
+  assert.equal(
+    liteLLMModelsHavePositivePricing(pricedModels, ["deepseek-chat", "deepseek-pro"]),
+    true,
+  );
+  assert.equal(liteLLMModelsHavePositivePricing(pricedModels, ["missing-model"]), false);
+  assert.equal(
+    liteLLMModelsHavePositivePricing(
+      {
+        data: [
+          ...(pricedModels.data as Array<Record<string, unknown>>),
+          {
+            model_name: "deepseek-chat",
+            model_info: { input_cost_per_token: 0, output_cost_per_token: 0.00000028 },
+          },
+        ],
+      },
+      ["deepseek-chat"],
+    ),
+    false,
+    "an unpriced duplicate must not create an unmetered routing path",
+  );
+  assert.equal(
+    await liteLLMModelPricingReady(async (path) => {
+      assert.equal(path, "/model/info");
+      return pricedModels;
+    }, ["deepseek-chat"]),
+    true,
+  );
+  assert.equal(
+    await liteLLMModelPricingReady(async () => {
+      throw new Error("model info unavailable");
+    }, ["deepseek-chat"]),
+    false,
+  );
+});
+
+test("LiteLLM refuses a budgeted key before generation when model pricing is unavailable", async () => {
+  const adapter = new LiteLLMAdapter({} as never);
+  const calls: string[] = [];
+  (adapter as any).get = async (path: string) => {
+    calls.push(path);
+    return {
+      data: [{ model_name: "deepseek-chat", model_info: { input_cost_per_token: 0, output_cost_per_token: 0 } }],
+    };
+  };
+  (adapter as any).call = async (path: string) => {
+    calls.push(path);
+    throw new Error("key generation must not run");
+  };
+
+  await assert.rejects(
+    adapter.issueKey({
+      model: "deepseek-chat",
+      alias: "device-unpriced",
+      expiresAt: new Date(Date.now() + 60_000),
+      limits: {
+        budgetLimits: [{ budgetDuration: "5h", maxBudgetUsd: 1 }],
+        rpmLimit: null,
+        tpmLimit: null,
+      },
+    }),
+    /refusing to issue an unenforceable USD budget/,
+  );
+  assert.deepEqual(calls, ["/model/info"]);
 });
 
 test("LiteLLM spend rows preserve real zero and mark missing or malformed aliases unavailable", () => {

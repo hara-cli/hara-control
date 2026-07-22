@@ -40,8 +40,9 @@ v1 hardening status is:
   Signed checkpoints are the deferred enterprise extension.
 - ✅ **Token discipline** — short TTL (`expiresAt`, default 7d), server-side revocation checks, and
   LiteLLM-enforced 5-hour / 7-day / 30-day rolling USD budgets plus optional RPM/TPM limits. The
-  gateway must confirm every requested limit before enrollment succeeds; otherwise the uncertain key
-  is revoked and the exchange fails closed. See [`docs/internal-key-policy.md`](docs/internal-key-policy.md).
+  gateway must expose positive model pricing and confirm every requested limit before enrollment succeeds;
+  otherwise the uncertain key is revoked and the exchange fails closed. See
+  [`docs/internal-key-policy.md`](docs/internal-key-policy.md).
 - 🟡 **Multi-tenant isolation** — Postgres RLS policies exist on all org-scoped tables; finishing it (a
   non-owner app role + `FORCE` + `WITH CHECK`) is documented in `HARDENING.md §A`.
 - ✅ **At-rest secrets** via AES-256-GCM envelope encryption / KMS. DeepSeek credential management

@@ -83,6 +83,9 @@ breakdowns, and active-key quota progress. The query selects only parameterized 
 from LiteLLM's isolated ledger; it never returns raw virtual keys, prompts, responses, authorization
 headers, or requester IP addresses. An organization-scoped admin can only read its assigned organization.
 If the ledger query fails, totals and charts become unavailable while configured limits remain visible.
+Because LiteLLM records `endTime` as a UTC wall clock without a PostgreSQL time-zone type, every range
+boundary is explicitly projected to UTC before comparison; the database session's local time zone must
+not change 5-hour, 7-day, or 30-day quota progress.
 
 Production readiness also checks positive pricing for every managed model. The deployment gate performs a
 minimal paid request with a temporary virtual key and requires both a spend-log row and positive recorded USD

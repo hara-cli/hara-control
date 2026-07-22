@@ -85,7 +85,13 @@ test("LiteLLM usage queries aliases parametrically and returns only safe aggrega
     assert.equal(query.values.includes("alias-1"), true);
     assert.doesNotMatch(query.sql, /alias-1/);
     assert.doesNotMatch(query.sql, /messages|response|requester_ip_address/);
+    assert.equal(query.values.some((value) => value instanceof Date), false);
+    assert.match(query.sql, /::timestamptz AT TIME ZONE 'UTC'/);
   }
+  const boundaryValues = captured.flatMap((query) => query.values).filter((value) =>
+    typeof value === "string" && value.endsWith("Z"));
+  assert.ok(boundaryValues.includes("2026-07-23T07:00:00.000Z"), "5-hour UTC boundary must remain an instant");
+  assert.ok(boundaryValues.includes("2026-07-23T13:00:00.000Z"), "range end must remain UTC");
 });
 
 test("LiteLLM usage marks the ledger unavailable instead of returning false zeroes", async () => {

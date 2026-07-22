@@ -168,7 +168,7 @@ docker run -d --name hara-control -p 4100:4100 \
   -e HARA_KMS_KEYFILE=/run/hara-secrets/kms-master.key \
   -v "$PWD/secrets/kms-master.key:/run/hara-secrets/kms-master.key:ro" \
   -e GATEWAY_ADAPTER=mock \
-  ghcr.io/hara-cli/hara-control:0.1.12
+  ghcr.io/hara-cli/hara-control:0.1.13
 ```
 
 Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database>?schema=public`.

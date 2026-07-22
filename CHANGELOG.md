@@ -2,6 +2,13 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.13 - 2026-07-23
+
+### Fixed
+
+- Compare every LiteLLM usage range and rolling-budget boundary as an explicit UTC wall-clock
+  timestamp, so a non-UTC PostgreSQL session cannot shift the 5-hour quota window by its local offset.
+
 ## 0.1.12 - 2026-07-23
 
 ### Added

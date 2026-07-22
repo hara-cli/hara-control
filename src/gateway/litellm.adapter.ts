@@ -166,6 +166,15 @@ export function normalizeLiteLLMRollingRows(
   });
 }
 
+/** LiteLLM stores SpendLogs.endTime as a UTC wall-clock value in a PostgreSQL `timestamp without
+ * time zone` column. Binding a JavaScript Date directly makes PostgreSQL reinterpret the instant in
+ * the session time zone before comparing it to that column (Asia/Shanghai shifts a 5h boundary by
+ * eight hours). Bind an ISO instant as timestamptz, then explicitly project it to a UTC wall clock. */
+export function liteLLMUtcTimestamp(value: Date): Prisma.Sql {
+  if (!Number.isFinite(value.getTime())) throw new Error("LiteLLM usage boundary must be a valid date");
+  return Prisma.sql`${value.toISOString()}::timestamptz AT TIME ZONE 'UTC'`;
+}
+
 function isPositivePrice(value: unknown): boolean {
   const price = Number(value);
   return Number.isFinite(price) && price > 0;
@@ -347,6 +356,11 @@ export class LiteLLMAdapter implements GatewayAdapter {
     const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60_000);
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60_000);
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60_000);
+    const fromUtc = liteLLMUtcTimestamp(window.from);
+    const toUtc = liteLLMUtcTimestamp(window.to);
+    const fiveHoursAgoUtc = liteLLMUtcTimestamp(fiveHoursAgo);
+    const sevenDaysAgoUtc = liteLLMUtcTimestamp(sevenDaysAgo);
+    const thirtyDaysAgoUtc = liteLLMUtcTimestamp(thirtyDaysAgo);
     try {
       const [bucketRows, rollingRows] = await Promise.all([
         this.prisma.$queryRaw<Array<{
@@ -367,10 +381,10 @@ export class LiteLLMAdapter implements GatewayAdapter {
                    COUNT(l."request_id")::int AS "requests",
                    MAX(l."endTime") AS "lastRequestAt"
               FROM "litellm"."LiteLLM_VerificationToken" v
-              JOIN "litellm"."LiteLLM_SpendLogs" l ON l."api_key" = v."token"
+             JOIN "litellm"."LiteLLM_SpendLogs" l ON l."api_key" = v."token"
              WHERE v."key_alias" IN (${Prisma.join(keyIds)})
-               AND l."endTime" >= ${window.from}
-               AND l."endTime" < ${window.to}
+               AND l."endTime" >= (${fromUtc})
+               AND l."endTime" < (${toUtc})
              GROUP BY 1, 2, 3
              ORDER BY 2 ASC
           `,
@@ -383,14 +397,14 @@ export class LiteLLMAdapter implements GatewayAdapter {
         }>>(
           Prisma.sql`
             SELECT v."key_alias" AS "keyId",
-                   COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= ${fiveHoursAgo}), 0)::double precision AS "spend5h",
-                   COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= ${sevenDaysAgo}), 0)::double precision AS "spend7d",
-                   COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= ${thirtyDaysAgo}), 0)::double precision AS "spend30d"
+                   COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= (${fiveHoursAgoUtc})), 0)::double precision AS "spend5h",
+                   COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= (${sevenDaysAgoUtc})), 0)::double precision AS "spend7d",
+                   COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= (${thirtyDaysAgoUtc})), 0)::double precision AS "spend30d"
               FROM "litellm"."LiteLLM_VerificationToken" v
               LEFT JOIN "litellm"."LiteLLM_SpendLogs" l
                 ON l."api_key" = v."token"
-               AND l."endTime" >= ${thirtyDaysAgo}
-               AND l."endTime" < ${window.to}
+               AND l."endTime" >= (${thirtyDaysAgoUtc})
+               AND l."endTime" < (${toUtc})
              WHERE v."key_alias" IN (${Prisma.join(keyIds)})
              GROUP BY v."key_alias"
           `,

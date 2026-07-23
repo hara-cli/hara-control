@@ -19,6 +19,12 @@ function dictionary(locale: "en" | "zh-CN" | "zh-TW"): Record<string, string> {
 test("console exposes the internal-key lifetime and all three enforced budget windows in every locale", () => {
   const required = [
     "enroll.policy.title",
+    "enroll.model.loading",
+    "enroll.model.hint",
+    "enroll.model.option.flash",
+    "enroll.model.option.pro",
+    "enroll.model.detail.flash",
+    "enroll.model.detail.pro",
     "enroll.policy.token_days",
     "enroll.policy.budgets",
     "enroll.policy.window.5h",
@@ -37,12 +43,15 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
   const html = readFileSync(join(root, "public", "console", "index.html"), "utf8");
   for (const id of [
     "ec-token-days",
+    "ec-model",
+    "ec-model-hint",
     "ec-budget-5h",
     "ec-budget-week",
     "ec-budget-month",
     "ec-rpm",
     "ec-tpm",
     "ec-policy-result",
+    "ec-result-model",
   ]) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
@@ -57,4 +66,6 @@ test("console JavaScript parses and sends the enforced policy fields to the enro
     assert.match(app, new RegExp(`\\b${field}\\b`));
   }
   assert.match(app, /\/admin\/enroll-codes/);
+  assert.match(app, /\/admin\/model-options/);
+  assert.match(app, /managedModelCatalog/);
 });

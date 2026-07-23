@@ -15,11 +15,11 @@ import {
 const pricedModels = {
   data: [
     {
-      model_name: "deepseek-chat",
+      model_name: "deepseek-v4-flash",
       model_info: { input_cost_per_token: 0.00000014, output_cost_per_token: 0.00000028 },
     },
     {
-      model_name: "deepseek-pro",
+      model_name: "deepseek-v4-pro",
       model_info: { input_cost_per_token: 0.000000435, output_cost_per_token: 0.00000087 },
     },
   ],
@@ -67,7 +67,7 @@ test("LiteLLM spend schema readiness fails closed when the shared database path 
 
 test("LiteLLM model pricing requires every deployment behind every budgeted alias to be positive", async () => {
   assert.equal(
-    liteLLMModelsHavePositivePricing(pricedModels, ["deepseek-chat", "deepseek-pro"]),
+    liteLLMModelsHavePositivePricing(pricedModels, ["deepseek-v4-flash", "deepseek-v4-pro"]),
     true,
   );
   assert.equal(liteLLMModelsHavePositivePricing(pricedModels, ["missing-model"]), false);
@@ -77,12 +77,12 @@ test("LiteLLM model pricing requires every deployment behind every budgeted alia
         data: [
           ...(pricedModels.data as Array<Record<string, unknown>>),
           {
-            model_name: "deepseek-chat",
+            model_name: "deepseek-v4-flash",
             model_info: { input_cost_per_token: 0, output_cost_per_token: 0.00000028 },
           },
         ],
       },
-      ["deepseek-chat"],
+      ["deepseek-v4-flash"],
     ),
     false,
     "an unpriced duplicate must not create an unmetered routing path",
@@ -91,13 +91,13 @@ test("LiteLLM model pricing requires every deployment behind every budgeted alia
     await liteLLMModelPricingReady(async (path) => {
       assert.equal(path, "/model/info");
       return pricedModels;
-    }, ["deepseek-chat"]),
+    }, ["deepseek-v4-flash"]),
     true,
   );
   assert.equal(
     await liteLLMModelPricingReady(async () => {
       throw new Error("model info unavailable");
-    }, ["deepseek-chat"]),
+    }, ["deepseek-v4-flash"]),
     false,
   );
 });
@@ -108,7 +108,7 @@ test("LiteLLM refuses a budgeted key before generation when model pricing is una
   (adapter as any).get = async (path: string) => {
     calls.push(path);
     return {
-      data: [{ model_name: "deepseek-chat", model_info: { input_cost_per_token: 0, output_cost_per_token: 0 } }],
+      data: [{ model_name: "deepseek-v4-flash", model_info: { input_cost_per_token: 0, output_cost_per_token: 0 } }],
     };
   };
   (adapter as any).call = async (path: string) => {
@@ -118,7 +118,7 @@ test("LiteLLM refuses a budgeted key before generation when model pricing is una
 
   await assert.rejects(
     adapter.issueKey({
-      model: "deepseek-chat",
+      model: "deepseek-v4-flash",
       alias: "device-unpriced",
       expiresAt: new Date(Date.now() + 60_000),
       limits: {
@@ -189,7 +189,7 @@ test("LiteLLM key generation carries all budget windows and rate limits to the d
   assert.deepEqual(
     liteLLMKeyIssuePayload(
       {
-        model: "deepseek-chat",
+        model: "deepseek-v4-flash",
         alias: "device-1",
         expiresAt: new Date("2026-07-29T00:00:00Z"),
         metadata: { orgId: "org-1" },
@@ -198,7 +198,7 @@ test("LiteLLM key generation carries all budget windows and rate limits to the d
       now,
     ),
     {
-      models: ["deepseek-chat"],
+      models: ["deepseek-v4-flash"],
       key_alias: "device-1",
       duration: "604800s",
       metadata: { orgId: "org-1" },

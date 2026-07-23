@@ -100,7 +100,7 @@ export class AdminService {
       personId,
       accessPolicy,
     });
-    return { code: ec.code, expiresAt: ec.expiresAt, accessPolicy };
+    return { code: ec.code, model: resolvedModel, expiresAt: ec.expiresAt, accessPolicy };
   }
 
   /** Read-only fleet view: who's online, version, token status, spend (joined from the gateway). */

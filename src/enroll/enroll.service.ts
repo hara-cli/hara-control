@@ -10,7 +10,10 @@ import {
   deviceTokenTtlMinutes,
 } from "../security/token-discipline";
 import { DeviceInfoDto } from "../protocol/dto";
-import { resolveEnrollmentModel } from "../providers/model-policy";
+import {
+  managedModelThinkingEfforts,
+  resolveEnrollmentModel,
+} from "../providers/model-policy";
 import { Prisma } from "@prisma/client";
 import {
   gatewayLimits,
@@ -105,6 +108,8 @@ export class EnrollService {
         device_token: issued.key,
         device_id: dev.id,
         model: resolvedModel,
+        available_models: [resolvedModel],
+        thinking_efforts: managedModelThinkingEfforts(resolvedModel),
         base_url: ec.baseUrl ?? undefined,
         expires_at: issued.expiresAt.toISOString(),
         access_policy: accessPolicy,

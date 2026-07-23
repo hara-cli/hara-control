@@ -397,7 +397,10 @@
     if (r === "usage" && lastUsageReport) renderUsage(lastUsageReport);
     if (r === "users") loadUsers();
     if (r === "orgs" && lastInspectId) inspectOrg(lastInspectId);
-    if (r === "enroll" && lastEnrollResult) paintEnrollResult(lastEnrollResult);
+    if (r === "enroll") {
+      if (managedModelCatalog) paintManagedModelCatalog();
+      if (lastEnrollResult) paintEnrollResult(lastEnrollResult);
+    }
     if (r === "overview") refreshOverview();
     if (r === "security" && me && me.role === "SUPERADMIN") loadProviderStatus();
     paintOrgChoices();
@@ -841,6 +844,81 @@
   // ║ 12.  Enroll codes                                                 ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   let lastEnrollResult = null;
+  let managedModelCatalog = null;
+  let managedModelCatalogPromise = null;
+
+  function modelOptionLabel(model) {
+    const localized = I18N.t(`enroll.model.option.${model.tier}`);
+    return localized.startsWith("enroll.model.option.")
+      ? model.id
+      : localized;
+  }
+
+  function modelOptionDetail(model) {
+    const localized = I18N.t(`enroll.model.detail.${model.tier}`);
+    if (!localized.startsWith("enroll.model.detail.")) return localized;
+    return model.contextWindowTokens && model.maxOutputTokens
+      ? `${model.id} · ${formatCount(model.contextWindowTokens)} context · ${formatCount(model.maxOutputTokens)} output`
+      : model.id;
+  }
+
+  function paintManagedModelCatalog() {
+    if (!managedModelCatalog) return;
+    const select = $("#ec-model");
+    const models = Array.isArray(managedModelCatalog.models) ? managedModelCatalog.models : [];
+    const previous = select.value;
+    select.innerHTML = models.map((model) => {
+      const label = modelOptionLabel(model);
+      const text = label === model.id ? model.id : `${label} · ${model.id}`;
+      return `<option value="${escapeHtml(model.id)}">${escapeHtml(text)}</option>`;
+    }).join("");
+    const selected = models.some((model) => model.id === previous)
+      ? previous
+      : managedModelCatalog.defaultModel;
+    if (selected && models.some((model) => model.id === selected)) select.value = selected;
+    select.disabled = models.length === 0;
+    const active = models.find((model) => model.id === select.value);
+    $("#ec-model-hint").textContent = active
+      ? modelOptionDetail(active)
+      : I18N.t("enroll.model.unavailable");
+    $("#ec-create").disabled = !active;
+  }
+
+  async function loadManagedModelCatalog(force = false) {
+    if (force) {
+      managedModelCatalog = null;
+      managedModelCatalogPromise = null;
+    }
+    if (managedModelCatalog) {
+      paintManagedModelCatalog();
+      return managedModelCatalog;
+    }
+    if (!managedModelCatalogPromise) {
+      managedModelCatalogPromise = api("GET", "/admin/model-options")
+        .then((catalog) => {
+          managedModelCatalog = catalog;
+          paintManagedModelCatalog();
+          return catalog;
+        })
+        .catch((error) => {
+          const select = $("#ec-model");
+          select.innerHTML = `<option value="">${escapeHtml(I18N.t("enroll.model.unavailable"))}</option>`;
+          select.disabled = true;
+          $("#ec-model-hint").textContent = error.message;
+          $("#ec-create").disabled = true;
+          throw error;
+        })
+        .finally(() => { managedModelCatalogPromise = null; });
+    }
+    return managedModelCatalogPromise;
+  }
+
+  router.on("enroll", () => {
+    getOrgChoices().catch(() => undefined);
+    loadManagedModelCatalog().catch(() => undefined);
+  });
+
+  $("#ec-model").addEventListener("change", paintManagedModelCatalog);
 
   function readOptionalPositiveNumber(id, { integer = false, max }) {
     const raw = $(id).value.trim();
@@ -895,6 +973,7 @@
     const model = $("#ec-model").value.trim();
     const gateway = $("#ec-gateway").value.trim().replace(/\/$/, "");
     if (!orgId) { toast(I18N.t("err.orgid_required"), "err"); return; }
+    if (!model) { toast(I18N.t("err.model_required"), "err"); return; }
     try {
       const tokenDays = readOptionalPositiveNumber("#ec-token-days", { integer: true, max: 365 }) ?? 7;
       const budgetLimits = [
@@ -909,7 +988,7 @@
       const tpmLimit = readOptionalPositiveNumber("#ec-tpm", { integer: true, max: 1_000_000_000 });
       const r = await api("POST", "/admin/enroll-codes", {
         orgId,
-        model: model || undefined,
+        model,
         tokenTtlMinutes: tokenDays * 24 * 60,
         budgetLimits,
         rpmLimit,
@@ -917,6 +996,7 @@
       });
       lastEnrollResult = {
         code: r.code,
+        model: r.model || model,
         gateway,
         expiresAt: r.expiresAt,
         accessPolicy: r.accessPolicy,
@@ -926,10 +1006,11 @@
     } catch (e) { toast(e.message, "err"); }
   });
 
-  function paintEnrollResult({ code, gateway, expiresAt, accessPolicy }) {
+  function paintEnrollResult({ code, model, gateway, expiresAt, accessPolicy }) {
     $("#ec-code-text").textContent = code;
     $("#ec-cmd-text").textContent = `hara enroll ${gateway} --code ${code}`;
     $("#ec-expires").textContent = formatDateTime(expiresAt);
+    $("#ec-result-model").textContent = model || "—";
     $("#ec-policy-result").textContent = formatAccessPolicy(accessPolicy);
     $("#ec-result").classList.remove("hidden");
   }

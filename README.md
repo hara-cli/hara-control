@@ -168,7 +168,7 @@ docker run -d --name hara-control -p 4100:4100 \
   -e HARA_KMS_KEYFILE=/run/hara-secrets/kms-master.key \
   -v "$PWD/secrets/kms-master.key:/run/hara-secrets/kms-master.key:ro" \
   -e GATEWAY_ADAPTER=mock \
-  ghcr.io/hara-cli/hara-control:0.1.13
+  ghcr.io/hara-cli/hara-control:0.1.14
 ```
 
 Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database>?schema=public`.
@@ -187,7 +187,7 @@ Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database
   end-to-end (see [`phase0/`](./phase0/)).
 - **Phase 1 — MVP: ✅ implemented.** NestJS + Prisma + Postgres. Endpoints: `POST /v1/enroll`,
   `POST /v1/heartbeat` (device-facing, matches the CLI contract); `POST /admin/orgs`,
-  `POST /admin/enroll-codes`, `GET /admin/fleet`, `GET /admin/usage`,
+  `GET /admin/model-options`, `POST /admin/enroll-codes`, `GET /admin/fleet`, `GET /admin/usage`,
   `POST /admin/devices/:id/revoke` (admin-gated).
   Device tokens are gateway virtual keys behind the `GatewayAdapter` seam (LiteLLM in prod, an
   in-process mock for dev/test); only token **hashes** are stored. Production includes readiness,

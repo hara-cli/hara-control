@@ -2,6 +2,24 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.14 - 2026-07-23
+
+### Added
+
+- Publish a server-authoritative managed-model catalog for administrators and replace the enrollment
+  console's free-text model alias with explicit DeepSeek V4 Flash and V4 Pro choices, including their
+  context, output, and supported thinking levels.
+- Return the enrolled key's `available_models` and `thinking_efforts` capability lists so newer CLI and
+  Desktop clients can render only controls the server-authorized model actually supports.
+
+### Changed
+
+- Issue new device keys with DeepSeek's canonical `deepseek-v4-flash` or `deepseek-v4-pro` model ID.
+  Existing `deepseek-chat` and `deepseek-pro` keys remain routed and priced for backward compatibility,
+  while old unused enrollment codes are canonicalized when redeemed.
+- Use canonical V4 model IDs in readiness and key-policy probes, and gate production deployment on
+  separate paid, metered requests through both Flash and Pro routes shown in the administrator console.
+
 ## 0.1.13 - 2026-07-23
 
 ### Fixed

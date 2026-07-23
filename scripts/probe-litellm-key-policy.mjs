@@ -66,7 +66,7 @@ export async function probeLiteLLMKeyPolicy(env = process.env) {
   let issueError;
   try {
     const response = await post(base, "/key/generate", {
-      models: ["deepseek-chat"],
+      models: ["deepseek-v4-flash"],
       key_alias: alias,
       duration: "15m",
       metadata: { purpose: "hara-control-policy-probe" },

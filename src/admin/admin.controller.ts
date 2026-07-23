@@ -3,6 +3,10 @@ import { AdminRole } from "@prisma/client";
 import { AdminService } from "./admin.service";
 import { AdminAuthGuard, assertAdminOrgAccess, AuthedUser } from "../common/admin-auth.guard";
 import { CreateEnrollCodeDto, CreateOrgDto } from "../protocol/dto";
+import {
+  defaultManagedModel,
+  managedModelOptions,
+} from "../providers/model-policy";
 
 // Operator-facing endpoints — gated by AdminAuthGuard (JWT OR back-compat x-admin-key).
 // Default required role = ADMIN (set in the guard). User-mgmt (SUPERADMIN) lives in AuthModule.
@@ -20,6 +24,17 @@ export class AdminController {
   listOrgs(@Req() req: { user?: AuthedUser }) {
     const user = req.user!;
     return this.admin.listOrgs(user.role === AdminRole.SUPERADMIN || user.viaSharedKey ? undefined : user.orgId);
+  }
+
+  /** Non-secret, deployment-authoritative choices for new device keys. Keeping this beside the
+   * enrollment endpoint lets both SUPERADMIN and tenant ADMIN users render the same allow-list that
+   * createEnrollCode enforces instead of accepting an undocumented free-text alias. */
+  @Get("model-options")
+  modelOptions() {
+    return {
+      defaultModel: defaultManagedModel(),
+      models: managedModelOptions(),
+    };
   }
 
   /** Ancestor chain (leaf-first: [self … root]) for an org unit — where it sits in the hierarchy. */

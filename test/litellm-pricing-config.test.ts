@@ -18,16 +18,24 @@ function price(block: string, field: string): number {
   return Number(match[1]);
 }
 
-test("DeepSeek aliases pin the official V4 per-token prices used by USD budget accounting", () => {
-  const flash = modelBlock("deepseek-chat");
+test("canonical DeepSeek V4 ids pin the per-token prices used by USD budget accounting", () => {
+  const flash = modelBlock("deepseek-v4-flash");
   assert.equal(price(flash, "input_cost_per_token") * 1_000_000, 0.14);
   assert.equal(price(flash, "output_cost_per_token") * 1_000_000, 0.28);
   assert.equal(price(flash, "cache_read_input_token_cost") * 1_000_000, 0.0028);
 
-  const pro = modelBlock("deepseek-pro");
+  const pro = modelBlock("deepseek-v4-pro");
   assert.equal(price(pro, "input_cost_per_token") * 1_000_000, 0.435);
   assert.equal(price(pro, "output_cost_per_token") * 1_000_000, 0.87);
   assert.equal(price(pro, "cache_read_input_token_cost") * 1_000_000, 0.003625);
+});
+
+test("legacy Hara aliases remain priced compatibility routes for already-issued keys", () => {
+  for (const alias of ["deepseek-chat", "deepseek-pro"]) {
+    const block = modelBlock(alias);
+    assert.ok(price(block, "input_cost_per_token") > 0);
+    assert.ok(price(block, "output_cost_per_token") > 0);
+  }
 });
 
 test("the mock model has synthetic positive pricing so the live E2E exercises spend accounting", () => {

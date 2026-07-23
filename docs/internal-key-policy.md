@@ -32,7 +32,7 @@ X-Admin-Key: <admin credential>
 
 {
   "orgId": "<organization id>",
-  "model": "deepseek-chat",
+  "model": "deepseek-v4-flash",
   "tokenTtlMinutes": 43200,
   "budgetLimits": [
     { "window": "5h", "maxUsd": 2 },

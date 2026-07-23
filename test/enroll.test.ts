@@ -118,6 +118,8 @@ test("enroll: valid code -> device token; code is single-use", async () => {
   const res = await svc.enroll("hara-good", { name: "mac", os: "darwin", hara_version: "0.68.0" });
   assert.ok(res.device_token.startsWith("sk-hara-mock-"), "issued a device token");
   assert.equal(res.model, "glm-5");
+  assert.deepEqual(res.available_models, ["glm-5"]);
+  assert.deepEqual(res.thinking_efforts, []);
   assert.ok(res.device_id, "returned a device id");
   assert.equal(prisma.db.tokens.length, 1, "stored exactly one token");
   assert.ok(prisma.db.tokens[0].tokenHash && prisma.db.tokens[0].tokenHash !== res.device_token, "stored the HASH, not the raw token");
@@ -175,6 +177,8 @@ test("enroll: applies and persists the admin-issued lifetime, rolling budgets, R
     tpmLimit: 120_000,
   });
   assert.equal(result.expires_at, "2026-07-24T00:00:00.000Z");
+  assert.deepEqual(result.available_models, ["deepseek-chat"]);
+  assert.deepEqual(result.thinking_efforts, ["off", "high", "max"]);
   assert.equal(result.access_policy.tokenTtlMinutes, 2 * 24 * 60);
   assert.equal(prisma.db.tokens[0].rpmLimit, 30);
   assert.equal(prisma.db.tokens[0].tpmLimit, 120_000);

@@ -191,7 +191,7 @@ export class ProviderCredentialsService {
           authorization: `Bearer ${masterKey}`,
         },
         body: JSON.stringify({
-          model: "deepseek-chat",
+          model: DEEPSEEK_DIRECT_PROBE_MODEL,
           messages: [{ role: "user", content: "Reply with OK." }],
           max_tokens: 1,
           stream: false,

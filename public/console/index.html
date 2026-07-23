@@ -371,8 +371,11 @@
               <input class="input input--mono" id="ec-orgid" type="text" list="org-options" data-i18n-placeholder="enroll.orgid.placeholder">
             </div>
             <div class="field">
-              <label class="field__label" for="ec-model" data-i18n="enroll.model">Model alias</label>
-              <input class="input" id="ec-model" type="text" data-i18n-placeholder="enroll.model.placeholder">
+              <label class="field__label" for="ec-model" data-i18n="enroll.model">Managed model</label>
+              <select class="select" id="ec-model" disabled>
+                <option value="" data-i18n="enroll.model.loading">Loading available models…</option>
+              </select>
+              <div class="field__hint" id="ec-model-hint" data-i18n="enroll.model.hint">The selected model is enforced by the issued device key.</div>
             </div>
             <div class="field">
               <label class="field__label" for="ec-gateway" data-i18n="enroll.gateway">Gateway URL</label>
@@ -451,6 +454,10 @@
             <div class="field">
               <label class="field__label" data-i18n="enroll.result.expires">Expires</label>
               <div class="mono small" id="ec-expires"></div>
+            </div>
+            <div class="field">
+              <label class="field__label" data-i18n="enroll.result.model">Managed model</label>
+              <div class="mono small" id="ec-result-model"></div>
             </div>
             <div class="field">
               <label class="field__label" data-i18n="enroll.result.policy">Issued key policy</label>

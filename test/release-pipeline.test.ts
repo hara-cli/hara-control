@@ -98,4 +98,6 @@ test("RDS deploy proves a paid request records spend before restarting Control",
   const controlAt = rdsDeploy.indexOf('echo "▶ (re)start Nest via pm2');
   assert.ok(liveAt >= 0 && probeAt > liveAt && controlAt > probeAt);
   assert.match(rdsDeploy, /scripts\/with-production-env\.mjs "\$APP_DIR\/\.env"/);
+  assert.match(rdsDeploy, /for probe_model in deepseek-v4-flash deepseek-v4-pro/);
+  assert.match(rdsDeploy, /HARA_PRICED_PROBE_MODEL="\$probe_model"/);
 });

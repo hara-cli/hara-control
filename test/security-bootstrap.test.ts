@@ -44,8 +44,8 @@ test("security bootstrap creates distinct non-echoed values and owner-only files
     assert.equal(litellmUrl.searchParams.get("sslmode"), "require");
     assert.equal(litellmUrl.username, "hara");
     assert.equal(litellmUrl.password, "p%40ss");
-    assert.equal(value("HARA_ALLOWED_MODELS"), "deepseek-chat,deepseek-pro");
-    assert.equal(value("HARA_DEFAULT_MODEL"), "deepseek-chat");
+    assert.equal(value("HARA_ALLOWED_MODELS"), "deepseek-v4-flash,deepseek-v4-pro");
+    assert.equal(value("HARA_DEFAULT_MODEL"), "deepseek-v4-flash");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

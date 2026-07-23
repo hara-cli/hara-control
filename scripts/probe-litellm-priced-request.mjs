@@ -6,6 +6,11 @@ import prismaPackage from "@prisma/client";
 
 const { PrismaClient } = prismaPackage;
 
+export const PRICED_PROBE_MODELS = Object.freeze([
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+]);
+
 export const PRICED_PROBE_POLICY = {
   budgetLimits: [
     { budget_duration: "5h", max_budget: 0.01 },
@@ -52,6 +57,14 @@ function localLiteLLMUrl(env = process.env) {
   return url.href.replace(/\/$/, "");
 }
 
+export function pricedProbeModel(env = process.env) {
+  const model = env.HARA_PRICED_PROBE_MODEL || PRICED_PROBE_MODELS[0];
+  if (!PRICED_PROBE_MODELS.includes(model)) {
+    throw new Error(`HARA_PRICED_PROBE_MODEL must be one of ${PRICED_PROBE_MODELS.join(", ")}`);
+  }
+  return model;
+}
+
 async function jsonPost(fetchImpl, base, path, body, bearer) {
   const response = await fetchImpl(`${base}${path}`, {
     method: "POST",
@@ -88,6 +101,7 @@ async function readSpend(prisma, alias) {
  * proves a successful request creates positive USD spend, then deletes the temporary virtual key. */
 export async function probeLiteLLMPricedRequest(env = process.env, dependencies = {}) {
   const base = localLiteLLMUrl(env);
+  const model = pricedProbeModel(env);
   const masterKey = env.LITELLM_MASTER_KEY || "";
   if (masterKey.length < 24) throw new Error("LITELLM_MASTER_KEY is missing or invalid");
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL is required for the spend assertion");
@@ -96,16 +110,16 @@ export async function probeLiteLLMPricedRequest(env = process.env, dependencies 
   const sleep = dependencies.sleep ?? ((milliseconds) => new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)));
   const prisma = dependencies.prisma ?? new PrismaClient();
   const ownsPrisma = !dependencies.prisma;
-  const alias = `hara-priced-probe-${Date.now()}-${randomBytes(6).toString("hex")}`;
+  const alias = `hara-priced-probe-${model.slice("deepseek-v4-".length)}-${Date.now()}-${randomBytes(6).toString("hex")}`;
   let primaryError;
   let safeResult;
 
   try {
     const issued = await jsonPost(fetchImpl, base, "/key/generate", {
-      models: ["deepseek-chat"],
+      models: [model],
       key_alias: alias,
       duration: "15m",
-      metadata: { purpose: "hara-control-priced-request-probe" },
+      metadata: { purpose: "hara-control-priced-request-probe", model },
       budget_limits: PRICED_PROBE_POLICY.budgetLimits,
       rpm_limit: PRICED_PROBE_POLICY.rpmLimit,
       tpm_limit: PRICED_PROBE_POLICY.tpmLimit,
@@ -123,7 +137,7 @@ export async function probeLiteLLMPricedRequest(env = process.env, dependencies 
         authorization: `Bearer ${virtualKey}`,
       },
       body: JSON.stringify({
-        model: "deepseek-chat",
+        model,
         messages: [{ role: "user", content: "Reply OK" }],
         max_tokens: 4,
         temperature: 0,
@@ -138,6 +152,7 @@ export async function probeLiteLLMPricedRequest(env = process.env, dependencies 
       const row = await readSpend(prisma, alias);
       if (positiveSpendRecorded(row)) {
         safeResult = {
+          model,
           logCount: Number(row.logCount),
           totalTokens: Number(row.totalTokens),
           spendPositive: true,
@@ -176,7 +191,7 @@ const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(imp
 if (isMain) {
   probeLiteLLMPricedRequest()
     .then((result) => {
-      console.log(`LiteLLM priced-request probe passed (${result.totalTokens} tokens); temporary key deleted`);
+      console.log(`LiteLLM priced-request probe passed for ${result.model} (${result.totalTokens} tokens); temporary key deleted`);
     })
     .catch((error) => {
       console.error(`LiteLLM priced-request probe failed: ${error.message}`);

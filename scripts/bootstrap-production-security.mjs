@@ -121,8 +121,8 @@ setValue("HARA_KMS_PROVIDER", "local");
 setValue("HARA_KMS_KEYFILE", keyfile);
 if (decodedCurrentValue("GATEWAY_ADAPTER") === "litellm") {
   setValue("LITELLM_DATABASE_URL", isolatedLiteLLMDatabaseUrl());
-  setValue("HARA_ALLOWED_MODELS", "deepseek-chat,deepseek-pro");
-  setValue("HARA_DEFAULT_MODEL", "deepseek-chat");
+  setValue("HARA_ALLOWED_MODELS", "deepseek-v4-flash,deepseek-v4-pro");
+  setValue("HARA_DEFAULT_MODEL", "deepseek-v4-flash");
 }
 
 const admin = currentValue("HARA_CONTROL_ADMIN_KEY");

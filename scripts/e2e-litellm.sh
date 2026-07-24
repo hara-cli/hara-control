@@ -13,7 +13,7 @@ export DATABASE_URL="postgresql://hara:hara@localhost:5433/hara_control?schema=p
 export HARA_CONTROL_ADMIN_KEY="admin-dev-e2e"
 export LITELLM_URL="http://localhost:4000"
 export GATEWAY_ADAPTER="litellm"
-export HARA_ALLOWED_MODELS="glm-mock"
+export HARA_ALLOWED_MODELS="glm-mock,glm-mock-pro"
 export HARA_DEFAULT_MODEL="glm-mock"
 export PORT="4100"
 export HARA_LICENSE_DEV=1 # self-mode dev bypass (no license needed for CI/e2e)

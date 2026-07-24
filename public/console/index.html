@@ -371,11 +371,11 @@
               <input class="input input--mono" id="ec-orgid" type="text" list="org-options" data-i18n-placeholder="enroll.orgid.placeholder">
             </div>
             <div class="field">
-              <label class="field__label" for="ec-model" data-i18n="enroll.model">Managed model</label>
+              <label class="field__label" for="ec-model" data-i18n="enroll.model">Default model</label>
               <select class="select" id="ec-model" disabled>
                 <option value="" data-i18n="enroll.model.loading">Loading available models…</option>
               </select>
-              <div class="field__hint" id="ec-model-hint" data-i18n="enroll.model.hint">The selected model is enforced by the issued device key.</div>
+              <div class="field__hint" id="ec-model-hint" data-i18n="enroll.model.hint">The same managed connection can switch among every authorized model; this only chooses its default.</div>
             </div>
             <div class="field">
               <label class="field__label" for="ec-gateway" data-i18n="enroll.gateway">Gateway URL</label>
@@ -456,7 +456,7 @@
               <div class="mono small" id="ec-expires"></div>
             </div>
             <div class="field">
-              <label class="field__label" data-i18n="enroll.result.model">Managed model</label>
+              <label class="field__label" data-i18n="enroll.result.model">Authorized models</label>
               <div class="mono small" id="ec-result-model"></div>
             </div>
             <div class="field">

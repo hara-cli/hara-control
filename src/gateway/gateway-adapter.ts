@@ -51,12 +51,17 @@ export interface GatewayUsageReport {
 
 export interface GatewayAdapter {
   issueKey(opts: {
+    /** Default model selected when the connection is first created. */
     model: string;
+    /** Complete authorized model catalog for this one device key. */
+    models?: string[];
     alias: string;
     expiresAt: Date;
     metadata?: Record<string, unknown>;
     limits?: GatewayKeyLimits;
   }): Promise<IssuedKey>;
+  /** Reconcile an existing key in place. The raw virtual key is never required or returned. */
+  syncKeyModels(keyId: string, models: string[]): Promise<string[]>;
   revokeKey(keyId: string): Promise<void>;
   listSpend(keyIds: string[]): Promise<SpendRecord[]>;
   usage(keyIds: string[], range: UsageRange, now?: Date): Promise<GatewayUsageReport>;

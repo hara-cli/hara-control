@@ -185,6 +185,76 @@ test("enroll: applies and persists the admin-issued lifetime, rolling budgets, R
   assert.deepEqual(prisma.db.tokens[0].budgetLimits, result.access_policy.budgetLimits);
 });
 
+test("formal managed enrollment and heartbeat expose both models on the same unchanged device key", async () => {
+  const previous = {
+    gateway: process.env.GATEWAY_ADAPTER,
+    allowed: process.env.HARA_ALLOWED_MODELS,
+    selectedDefault: process.env.HARA_DEFAULT_MODEL,
+  };
+  process.env.GATEWAY_ADAPTER = "litellm";
+  process.env.HARA_ALLOWED_MODELS = "deepseek-v4-flash,deepseek-v4-pro";
+  process.env.HARA_DEFAULT_MODEL = "deepseek-v4-flash";
+  try {
+    const prisma = fakePrisma();
+    prisma.db.codes.set("hara-multi", {
+      id: "c-multi",
+      orgId: "o1",
+      code: "hara-multi",
+      model: "deepseek-chat",
+      baseUrl: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+    });
+    const delegate = new MockGatewayAdapter();
+    let issued: Parameters<GatewayAdapter["issueKey"]>[0] | null = null;
+    const synchronized: Array<{ keyId: string; models: string[] }> = [];
+    const gateway = {
+      issueKey: async (opts: Parameters<GatewayAdapter["issueKey"]>[0]) => {
+        issued = opts;
+        return delegate.issueKey(opts);
+      },
+      syncKeyModels: async (keyId: string, models: string[]) => {
+        synchronized.push({ keyId, models });
+        return delegate.syncKeyModels(keyId, models);
+      },
+      revokeKey: (keyId: string) => delegate.revokeKey(keyId),
+      listSpend: (keyIds: string[]) => delegate.listSpend(keyIds),
+      usage: () => delegate.usage(),
+      readiness: () => delegate.readiness(),
+    } satisfies GatewayAdapter;
+    const service = svcFor(prisma, gateway);
+    const enrolled = await service.enroll(
+      "hara-multi",
+      { name: "winter-mac", os: "darwin", hara_version: "0.134.2" },
+    );
+
+    assert.equal(enrolled.model, "deepseek-v4-flash");
+    assert.deepEqual(enrolled.available_models, ["deepseek-v4-flash", "deepseek-v4-pro"]);
+    assert.deepEqual(issued!.models, ["deepseek-v4-flash", "deepseek-v4-pro"]);
+    const originalDeviceToken = enrolled.device_token;
+    // Simulate a key issued before canonical V4 ids existed. New clients should see only the
+    // canonical catalog, while the old persisted alias remains usable at the data plane.
+    prisma.db.tokens[0].model = "deepseek-chat";
+    const heartbeat = await service.heartbeat(
+      originalDeviceToken,
+      { hara_version: "0.134.2", os: "darwin" },
+    );
+    assert.deepEqual(heartbeat.available_models, ["deepseek-v4-flash", "deepseek-v4-pro"]);
+    assert.equal(enrolled.device_token, originalDeviceToken, "the user-facing key is not rotated");
+    assert.deepEqual(synchronized, [{
+      keyId: enrolled.device_id,
+      models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"],
+    }]);
+  } finally {
+    if (previous.gateway === undefined) delete process.env.GATEWAY_ADAPTER;
+    else process.env.GATEWAY_ADAPTER = previous.gateway;
+    if (previous.allowed === undefined) delete process.env.HARA_ALLOWED_MODELS;
+    else process.env.HARA_ALLOWED_MODELS = previous.allowed;
+    if (previous.selectedDefault === undefined) delete process.env.HARA_DEFAULT_MODEL;
+    else process.env.HARA_DEFAULT_MODEL = previous.selectedDefault;
+  }
+});
+
 test("enroll: expired or unknown code is rejected", async () => {
   const prisma = fakePrisma();
   prisma.db.codes.set("hara-old", { id: "c2", orgId: "o1", code: "hara-old", model: "", baseUrl: null, expiresAt: new Date(Date.now() - 1_000), usedAt: null });

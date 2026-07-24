@@ -11,7 +11,9 @@ import {
 } from "../security/token-discipline";
 import { DeviceInfoDto } from "../protocol/dto";
 import {
-  managedModelThinkingEfforts,
+  enrollmentManagedModels,
+  managedKeyAuthorizationModels,
+  managedModelsThinkingEfforts,
   resolveEnrollmentModel,
 } from "../providers/model-policy";
 import { Prisma } from "@prisma/client";
@@ -39,6 +41,7 @@ export class EnrollService {
     }
     await this.entitlement.seatCheck(ec.orgId); // licensed seat cap
     const resolvedModel = resolveEnrollmentModel(ec.model);
+    const availableModels = enrollmentManagedModels(resolvedModel);
     const accessPolicy = parseStoredAccessKeyPolicy(
       {
         tokenTtlMinutes: ec.tokenTtlMinutes,
@@ -79,6 +82,7 @@ export class EnrollService {
       const requestedExpiry = deviceTokenExpiry(now, process.env, accessPolicy.tokenTtlMinutes);
       issued = await this.gateway.issueKey({
         model: resolvedModel,
+        models: availableModels,
         alias: dev.id,
         expiresAt: requestedExpiry,
         metadata: { orgId: ec.orgId },
@@ -108,8 +112,8 @@ export class EnrollService {
         device_token: issued.key,
         device_id: dev.id,
         model: resolvedModel,
-        available_models: [resolvedModel],
-        thinking_efforts: managedModelThinkingEfforts(resolvedModel),
+        available_models: availableModels,
+        thinking_efforts: managedModelsThinkingEfforts(availableModels),
         base_url: ec.baseUrl ?? undefined,
         expires_at: issued.expiresAt.toISOString(),
         access_policy: accessPolicy,
@@ -156,6 +160,12 @@ export class EnrollService {
     const dt = await this.prisma.deviceToken.findUnique({ where: { tokenHash: sha256(bearer) } });
     // central token discipline: revocation + short-TTL expiry + spend-cap hook (see token-discipline.ts)
     await assertTokenUsable(dt, { now });
+    const resolvedModel = resolveEnrollmentModel(dt!.model);
+    const availableModels = enrollmentManagedModels(resolvedModel);
+    await this.gateway.syncKeyModels(
+      dt!.gatewayKeyId,
+      managedKeyAuthorizationModels(dt!.model, availableModels),
+    );
     await this.prisma.device.update({
       where: { id: dt!.deviceId },
       data: {
@@ -164,5 +174,11 @@ export class EnrollService {
         ...(body.os ? { os: body.os } : {}),
       },
     });
+    return {
+      model: resolvedModel,
+      available_models: availableModels,
+      thinking_efforts: managedModelsThinkingEfforts(availableModels),
+      expires_at: dt!.expiresAt?.toISOString(),
+    };
   }
 }

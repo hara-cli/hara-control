@@ -16,8 +16,8 @@ export class EnrollController {
   }
 
   @Post("heartbeat")
-  @HttpCode(204)
+  @HttpCode(200)
   async heartbeat(@Headers("authorization") auth: string | undefined, @Body() dto: HeartbeatDto) {
-    await this.enroll.heartbeat(bearer(auth), dto);
+    return this.enroll.heartbeat(bearer(auth), dto);
   }
 }

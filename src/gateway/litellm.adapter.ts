@@ -27,14 +27,16 @@ export function liteLLMKeyDuration(expiresAt: Date, now = new Date()): string {
 
 export function liteLLMKeyIssuePayload(opts: {
   model: string;
+  models?: string[];
   alias: string;
   expiresAt: Date;
   metadata?: Record<string, unknown>;
   limits?: GatewayKeyLimits;
 }, now = new Date()): Record<string, unknown> {
   const limits = opts.limits;
+  const models = opts.models?.length ? [...new Set(opts.models)] : opts.model ? [opts.model] : [];
   return {
-    models: opts.model ? [opts.model] : [],
+    models,
     key_alias: opts.alias,
     duration: liteLLMKeyDuration(opts.expiresAt, now),
     metadata: opts.metadata ?? {},
@@ -270,20 +272,23 @@ export class LiteLLMAdapter implements GatewayAdapter {
 
   async issueKey({
     model,
+    models,
     alias,
     expiresAt,
     metadata,
     limits,
   }: {
     model: string;
+    models?: string[];
     alias: string;
     expiresAt: Date;
     metadata?: Record<string, unknown>;
     limits?: GatewayKeyLimits;
   }): Promise<IssuedKey> {
+    const authorizedModels = models?.length ? [...new Set(models)] : model ? [model] : [];
     if (
       limits?.budgetLimits.length &&
-      !(await liteLLMModelPricingReady((path) => this.get(path), [model]))
+      !(await liteLLMModelPricingReady((path) => this.get(path), authorizedModels))
     ) {
       throw new Error("LiteLLM model pricing is unavailable; refusing to issue an unenforceable USD budget");
     }
@@ -292,7 +297,7 @@ export class LiteLLMAdapter implements GatewayAdapter {
     try {
       j = await this.call(
         "/key/generate",
-        liteLLMKeyIssuePayload({ model, alias, expiresAt, metadata, limits }, startedAt),
+        liteLLMKeyIssuePayload({ model, models: authorizedModels, alias, expiresAt, metadata, limits }, startedAt),
       );
     } catch (error) {
       // A request can cross the gateway boundary before a timeout/malformed response is observed.
@@ -321,6 +326,48 @@ export class LiteLLMAdapter implements GatewayAdapter {
       throw new Error("LiteLLM returned an invalid or unenforced key-policy response");
     }
     return { key, keyId: alias, expiresAt: gatewayExpiry };
+  }
+
+  async syncKeyModels(keyId: string, models: string[]): Promise<string[]> {
+    const desired = [...new Set(models)];
+    if (!desired.length) throw new Error("managed device key must authorize at least one model");
+
+    const readKey = async (): Promise<{ token: string; models: string[] }> => {
+      const rows = await this.prisma.$queryRaw<Array<{ token: unknown; models: unknown }>>(
+        Prisma.sql`
+          SELECT "token", "models"
+            FROM "litellm"."LiteLLM_VerificationToken"
+           WHERE "key_alias" = ${keyId}
+        `,
+      );
+      if (rows.length !== 1) throw new Error("LiteLLM device key was not found by its private alias");
+      const token = rows[0].token;
+      const currentModels = rows[0].models;
+      if (typeof token !== "string" || !/^[a-f0-9]{64}$/i.test(token)) {
+        throw new Error("LiteLLM device key identifier is invalid");
+      }
+      if (!Array.isArray(currentModels) || !currentModels.every((model) => typeof model === "string")) {
+        throw new Error("LiteLLM device key model policy is invalid");
+      }
+      return { token, models: [...new Set(currentModels)] };
+    };
+
+    const current = await readKey();
+    if (current.models.length === desired.length && desired.every((model) => current.models.includes(model))) {
+      return desired;
+    }
+    if (!(await liteLLMModelPricingReady((path) => this.get(path), desired))) {
+      throw new Error("LiteLLM model pricing is unavailable; refusing to expand a budgeted device key");
+    }
+    // LiteLLM 1.92 accepts its already-hashed token identifier at /key/update. Hara reads it only
+    // inside this adapter, sends it over the private master-authenticated link, and never logs or
+    // persists it outside LiteLLM's own schema.
+    await this.call("/key/update", { key: current.token, models: desired });
+    const updated = await readKey();
+    if (updated.models.length !== desired.length || !desired.every((model) => updated.models.includes(model))) {
+      throw new Error("LiteLLM did not apply the requested device key model policy");
+    }
+    return desired;
   }
 
   async revokeKey(keyId: string): Promise<void> {

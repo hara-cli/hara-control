@@ -2,6 +2,21 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.15 - 2026-07-24
+
+### Fixed
+
+- Authorize every managed model on one device key, treating the enrollment form's model choice as the
+  connection default rather than a separate credential boundary. A colleague can now switch between
+  DeepSeek V4 Flash and V4 Pro through the same Hara Control connection without replacing the Token.
+- Reconcile already-issued single-model LiteLLM keys in place during an authenticated heartbeat and
+  return the current model/thinking catalog. The CLI persists that catalog only when the response still
+  belongs to the same profile and credential, so a late heartbeat cannot overwrite a re-enrollment.
+  Older devices retain their already-bound `deepseek-chat` or `deepseek-pro` alias as a hidden
+  compatibility route while new clients see only the canonical V4 catalog.
+- Attribute usage breakdowns to the model recorded by LiteLLM instead of the connection default, while
+  keeping expiry, rolling budgets, RPM, and TPM limits aggregated on the same device key.
+
 ## 0.1.14 - 2026-07-23
 
 ### Added

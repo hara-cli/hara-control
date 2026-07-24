@@ -15,7 +15,7 @@
 
 - **Device enrollment** — `hara enroll <gateway>` pairs a machine, issues it a scoped device token
   (the real upstream provider key **never** lands on the device).
-- **Token lifecycle** — issue / scope / expiry / rolling budget / rate limit / revoke per device, per user.
+- **Token lifecycle** — issue / multi-model scope / expiry / rolling budget / rate limit / revoke per device, per user.
 - **Fleet view** — which machines are online, who, version, today's tokens + cost, which models.
 - **Governance** — model allow-lists, per-seat budgets, data-residency policy, org RBAC, audit log.
 - **Multi-tenant** (later) — many orgs on one managed deployment.
@@ -75,6 +75,9 @@ Config knobs for the above are in [`.env.example`](./.env.example).
   budgets, and rates; an upstream connection pool controls encrypted provider credentials and routing.
   Internal limits are implemented independently so issuing a colleague key never exposes or copies an
   upstream provider key.
+- **One connection, one token, multiple authorized models**: the enrollment model is the initial default.
+  The same device credential can switch among the deployment's managed-model catalog, while its lifetime,
+  rolling budgets, RPM, and TPM limits continue to apply to the connection as a whole.
 - **Shared Postgres, isolated schemas**: hara-control uses `schema=public`; LiteLLM uses
   `schema=litellm`. This keeps migrations/table names from colliding while still permitting an
   explicitly-reviewed usage aggregation path without cross-database ETL.

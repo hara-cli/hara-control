@@ -19,7 +19,8 @@ the non-secret gateway key identifier.
 The week and month labels are rolling durations measured from the key's issue/reset lifecycle. They are
 not calendar-week or calendar-month accounting. Up to one limit per window can be active at the same
 time. Omitting a budget or rate field leaves that dimension unlimited; the default key lifetime remains
-seven days.
+seven days. Every limit applies to the device key as a whole, aggregated across all models used through
+that one managed connection.
 
 ## Create a limited enrollment code
 
@@ -44,6 +45,11 @@ X-Admin-Key: <admin credential>
 }
 ```
 
+`model` selects the connection's initial default. It does not mint a model-specific credential: the
+resulting device key is authorized for the deployment's complete managed-model catalog, such as
+`deepseek-v4-flash` and `deepseek-v4-pro`. A user switches models inside the same CLI/Desktop connection
+without replacing the key.
+
 The response returns the one-time code, its exchange expiry, and the normalized `accessPolicy`. Treat the
 code as a credential: deliver it only to its intended colleague, never put it in chat logs, and let it be
 consumed once.
@@ -51,9 +57,9 @@ consumed once.
 ## Enforcement and failure behavior
 
 1. Hara Control validates and stores the normalized policy with the one-time code.
-2. Enrollment atomically claims the code and requests a model-scoped LiteLLM key with the exact expiry,
-   three rolling budget windows, RPM, and TPM values.
-3. Before a USD-limited key is minted, Hara requires every LiteLLM deployment behind that model alias to
+2. Enrollment atomically claims the code and requests one LiteLLM key authorized for every managed model,
+   with the exact expiry, three rolling budget windows, RPM, and TPM values.
+3. Before a USD-limited key is minted, Hara requires every LiteLLM deployment behind every authorized alias to
    report positive input and output prices. Missing, zero, or unreadable pricing fails closed because a
    dollar ceiling cannot be enforced against zero-cost accounting.
 4. LiteLLM must return the authoritative expiry and confirm every requested limit. A missing, changed, or
@@ -63,13 +69,20 @@ consumed once.
    admin console show expiry and configured limits without revealing the token.
 6. Expired keys are excluded from the active fleet view. Explicit device revoke invalidates the key in both
    the control plane and LiteLLM.
+7. On an authenticated heartbeat, Control reconciles older single-model keys in place by private alias and
+   returns the current authorized catalog. The raw device token never needs to be reissued or sent back.
+   If that device was originally bound to a pre-V4 model alias, the alias remains authorized but hidden
+   from the new catalog so an older CLI keeps working until it upgrades.
 
 ## Fleet spend integrity
 
 Hara never stores the raw LiteLLM virtual key after enrollment, so fleet usage must not call an endpoint
-that requires that raw key. In a formal LiteLLM deployment, Control reads only `key_alias` and `spend`
-from the isolated `litellm.LiteLLM_VerificationToken` table in the shared PostgreSQL database. Alias
-filters are parameterized, and neither the token column nor provider credentials are selected.
+that requires that raw key. In a formal LiteLLM deployment, usage collection reads only `key_alias` and
+`spend` from the isolated `litellm.LiteLLM_VerificationToken` table in the shared PostgreSQL database.
+Alias filters are parameterized, and neither the token column nor provider credentials are selected by
+usage queries. The separate in-place model-policy reconciliation path may read LiteLLM's one-way 64-hex
+token identifier for exactly one private alias and submit it to the master-authenticated internal
+`/key/update` endpoint; it never returns, logs, or copies that identifier into Hara storage.
 
 The fleet response includes `spend_available`. A real zero is returned as `spend: 0` with
 `spend_available: true`; a missing/unreadable authoritative source is `spend: null` with

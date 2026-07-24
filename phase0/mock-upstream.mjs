@@ -52,7 +52,21 @@ const server = http.createServer(async (req, res) => {
       ? { role: "assistant", content: null, tool_calls: [{ id: "call_mock_1", type: "function", function: { name: "get_weather", arguments: '{"location":"San Francisco"}' } }] }
       : { role: "assistant", content: "Hello from the mock upstream." };
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ id, object: "chat.completion", created: 0, model, choices: [{ index: 0, message, finish_reason: wantsTool(body) ? "tool_calls" : "stop" }] }));
+    res.end(JSON.stringify({
+      id,
+      object: "chat.completion",
+      created: 0,
+      model,
+      choices: [{ index: 0, message, finish_reason: wantsTool(body) ? "tool_calls" : "stop" }],
+      // Real OpenAI-compatible providers report usage on non-streaming completions. Supplying it in
+      // the mock keeps LiteLLM's spend ledger deterministic instead of depending on a tokenizer
+      // fallback for the deliberately synthetic model names used by this E2E.
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 6,
+        total_tokens: 7,
+      },
+    }));
     return;
   }
 

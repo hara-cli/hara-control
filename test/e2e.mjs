@@ -39,7 +39,13 @@ const ok = (c, m) => { if (!c) throw new Error(`assertion failed: ${m}`); };
   ok(r.status === 401, `reused code rejected -> 401 (got ${r.status})`);
 
   r = await deviceReq("/v1/heartbeat", { device_id: enr.device_id, hara_version: "0.68.0", os: "darwin" }, enr.device_token);
-  ok(r.status === 204, `heartbeat -> 204 (got ${r.status})`);
+  ok(r.status === 200, `heartbeat -> 200 (got ${r.status})`);
+  const heartbeat = await r.json();
+  ok(heartbeat.model === enr.model, `heartbeat keeps the enrolled default model (got ${heartbeat.model})`);
+  ok(
+    Array.isArray(heartbeat.available_models) && heartbeat.available_models.includes(enr.model),
+    `heartbeat returns an authorized model catalog (got ${JSON.stringify(heartbeat.available_models)})`,
+  );
 
   r = await adminReq(`/admin/fleet?orgId=${org.id}`, null, "GET");
   ok(r.ok, `fleet -> ${r.status}`);

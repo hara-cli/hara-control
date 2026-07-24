@@ -1,6 +1,6 @@
 {
   "name": "hara-control",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": true,
   "description": "Apache-2.0 self-hosted control plane for the Hara fleet.",
   "license": "Apache-2.0",

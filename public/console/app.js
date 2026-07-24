@@ -997,6 +997,7 @@
       lastEnrollResult = {
         code: r.code,
         model: r.model || model,
+        models: Array.isArray(r.models) ? r.models : [r.model || model].filter(Boolean),
         gateway,
         expiresAt: r.expiresAt,
         accessPolicy: r.accessPolicy,
@@ -1006,11 +1007,13 @@
     } catch (e) { toast(e.message, "err"); }
   });
 
-  function paintEnrollResult({ code, model, gateway, expiresAt, accessPolicy }) {
+  function paintEnrollResult({ code, model, models, gateway, expiresAt, accessPolicy }) {
     $("#ec-code-text").textContent = code;
     $("#ec-cmd-text").textContent = `hara enroll ${gateway} --code ${code}`;
     $("#ec-expires").textContent = formatDateTime(expiresAt);
-    $("#ec-result-model").textContent = model || "—";
+    $("#ec-result-model").textContent = Array.isArray(models) && models.length
+      ? models.join(" · ")
+      : model || "—";
     $("#ec-policy-result").textContent = formatAccessPolicy(accessPolicy);
     $("#ec-result").classList.remove("hidden");
   }

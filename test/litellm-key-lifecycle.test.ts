@@ -190,6 +190,7 @@ test("LiteLLM key generation carries all budget windows and rate limits to the d
     liteLLMKeyIssuePayload(
       {
         model: "deepseek-v4-flash",
+        models: ["deepseek-v4-flash", "deepseek-v4-pro"],
         alias: "device-1",
         expiresAt: new Date("2026-07-29T00:00:00Z"),
         metadata: { orgId: "org-1" },
@@ -198,7 +199,7 @@ test("LiteLLM key generation carries all budget windows and rate limits to the d
       now,
     ),
     {
-      models: ["deepseek-v4-flash"],
+      models: ["deepseek-v4-flash", "deepseek-v4-pro"],
       key_alias: "device-1",
       duration: "604800s",
       metadata: { orgId: "org-1" },
@@ -234,4 +235,39 @@ test("LiteLLM key generation carries all budget windows and rate limits to the d
     false,
     "missing windows fail closed",
   );
+});
+
+test("LiteLLM expands an existing device alias in place without requiring the raw virtual key", async () => {
+  const hashedToken = "a".repeat(64);
+  let reads = 0;
+  const adapter = new LiteLLMAdapter({
+    $queryRaw: async () => {
+      reads += 1;
+      return [{
+        token: hashedToken,
+        models: reads === 1
+          ? ["deepseek-v4-flash"]
+          : ["deepseek-v4-flash", "deepseek-v4-pro"],
+      }];
+    },
+  } as never);
+  const calls: Array<{ path: string; body: unknown }> = [];
+  (adapter as any).get = async () => pricedModels;
+  (adapter as any).call = async (path: string, body: unknown) => {
+    calls.push({ path, body });
+    return { models: ["deepseek-v4-flash", "deepseek-v4-pro"] };
+  };
+
+  assert.deepEqual(
+    await adapter.syncKeyModels("device-1", ["deepseek-v4-flash", "deepseek-v4-pro"]),
+    ["deepseek-v4-flash", "deepseek-v4-pro"],
+  );
+  assert.deepEqual(calls, [{
+    path: "/key/update",
+    body: {
+      key: hashedToken,
+      models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    },
+  }]);
+  assert.equal(reads, 2, "the authoritative LiteLLM row is verified after update");
 });

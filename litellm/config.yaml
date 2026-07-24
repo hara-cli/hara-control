@@ -14,6 +14,14 @@ model_list:
     model_info:
       input_cost_per_token: 0.000001
       output_cost_per_token: 0.000001
+  - model_name: glm-mock-pro
+    litellm_params:
+      model: openai/glm-mock-pro
+      api_base: os.environ/HARA_MOCK_BASE
+      api_key: mock-not-a-real-key
+    model_info:
+      input_cost_per_token: 0.000001
+      output_cost_per_token: 0.000001
 
   # ── Real upstream: DeepSeek (regular pay-as-you-go key in UPSTREAM_API_KEY; NOT a coding-plan sk-sp key) ──
   # OpenAI-compatible at https://api.deepseek.com/chat/completions (Bearer). New Hara keys expose

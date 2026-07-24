@@ -64,7 +64,7 @@ test("admin usage aggregates time buckets, device/model breakdown, and rolling q
     deviceId: "device-1",
     deviceName: "Winter Mac",
     principal: "冬芹",
-    model: "deepseek-chat",
+    model: "deepseek-v4-flash",
     spend: 0.25,
     totalTokens: 1200,
     requests: 3,

@@ -104,6 +104,15 @@ export function managedModelThinkingEfforts(model: string): string[] {
   return details ? [...details.thinkingEfforts] : [];
 }
 
+/** Capabilities that are safe to expose as one shared dial for a multi-model connection. Use the
+ * intersection: a choice advertised here must remain valid after the user switches to any model. */
+export function managedModelsThinkingEfforts(models: readonly string[]): string[] {
+  if (!models.length) return [];
+  const efforts = models.map((model) => managedModelThinkingEfforts(model));
+  if (efforts.some((items) => items.length === 0)) return [];
+  return efforts[0].filter((effort) => efforts.slice(1).every((items) => items.includes(effort)));
+}
+
 /** Mock/dev keeps its existing arbitrary model behavior. Formal LiteLLM enrollment always resolves
  * to one server-approved alias, including old enrollment codes whose stored model is empty. */
 export function resolveEnrollmentModel(
@@ -119,4 +128,34 @@ export function resolveEnrollmentModel(
     throw new Error(`model "${resolved}" is not allowed by this Hara deployment`);
   }
   return resolved;
+}
+
+/** A managed connection carries the deployment's complete authorized catalog. `selected` is the
+ * default model, not the identity of a separately issued credential. Mock/dev fixtures deliberately
+ * retain their historical single arbitrary model contract. */
+export function enrollmentManagedModels(
+  selected: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  if (env.GATEWAY_ADAPTER !== "litellm") return selected ? [selected] : [];
+  const models = allowedManagedModels(env);
+  if (!models.includes(resolveEnrollmentModel(selected, env))) {
+    throw new Error(`model "${selected}" is not allowed by this Hara deployment`);
+  }
+  return models;
+}
+
+/** Keep the one legacy alias already bound to an older device key as a hidden compatibility route.
+ * New clients see only `catalog`; old clients may continue sending their persisted pre-V4 model name
+ * after Control upgrades the same credential in place. */
+export function managedKeyAuthorizationModels(
+  storedModel: string,
+  catalog: readonly string[],
+): string[] {
+  const models = [...new Set(catalog)];
+  const legacy = storedModel.trim();
+  if (legacy && canonicalManagedModelId(legacy) !== legacy && !models.includes(legacy)) {
+    models.push(legacy);
+  }
+  return models;
 }

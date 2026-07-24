@@ -5,7 +5,10 @@ import { AuditService } from "../audit/audit.service";
 import { OrgTreeService } from "../org/org-tree.service";
 import { GATEWAY_ADAPTER, GatewayAdapter } from "../gateway/gateway-adapter";
 import { randomId } from "../common/crypto";
-import { resolveEnrollmentModel } from "../providers/model-policy";
+import {
+  enrollmentManagedModels,
+  resolveEnrollmentModel,
+} from "../providers/model-policy";
 import { deviceTokenTtlMinutes } from "../security/token-discipline";
 import {
   ACCESS_BUDGET_WINDOWS,
@@ -80,6 +83,7 @@ export class AdminService {
     } catch (error) {
       throw new BadRequestException((error as Error).message);
     }
+    const models = enrollmentManagedModels(resolvedModel);
     const ec = await this.prisma.enrollCode.create({
       data: {
         orgId,
@@ -96,11 +100,18 @@ export class AdminService {
     });
     await this.audit.log(orgId, "enroll_code.create", "admin", "", {
       model: resolvedModel,
+      models,
       ttlMinutes,
       personId,
       accessPolicy,
     });
-    return { code: ec.code, model: resolvedModel, expiresAt: ec.expiresAt, accessPolicy };
+    return {
+      code: ec.code,
+      model: resolvedModel,
+      models,
+      expiresAt: ec.expiresAt,
+      accessPolicy,
+    };
   }
 
   /** Read-only fleet view: who's online, version, token status, spend (joined from the gateway). */
@@ -126,6 +137,7 @@ export class AdminService {
         online: now.getTime() - d.lastSeenAt.getTime() < ONLINE_WINDOW_MS,
         token_active: Boolean(active),
         model: active?.model ?? "",
+        available_models: active ? enrollmentManagedModels(active.model) : [],
         spend: active ? (spend.get(active.gatewayKeyId) ?? null) : null,
         spend_available: active ? spend.get(active.gatewayKeyId) != null : false,
         expires_at: active?.expiresAt ?? null,
@@ -216,7 +228,7 @@ export class AdminService {
         totalTokens += entry.totalTokens;
         requests += entry.requests;
         if (!latestRequestAt || entry.lastRequestAt > latestRequestAt) latestRequestAt = entry.lastRequestAt;
-        const model = meta.model || entry.model || "";
+        const model = entry.model || meta.model || "";
         const breakdownKey = `${meta.deviceId}\u0000${model}`;
         const existing = breakdown.get(breakdownKey) ?? {
           ...meta,
@@ -266,6 +278,7 @@ export class AdminService {
         deviceName: device.name,
         principal: device.person?.name || device.person?.email || device.name,
         model: token.model,
+        availableModels: enrollmentManagedModels(token.model),
         expiresAt: token.expiresAt,
         rpmLimit: token.rpmLimit,
         tpmLimit: token.tpmLimit,

@@ -10,14 +10,16 @@ import { resolve } from "node:path";
 const CTRL = process.env.HARA_CONTROL_URL || "http://localhost:4100";
 const LITELLM = process.env.LITELLM_URL || "http://localhost:4000";
 const ADMIN = process.env.HARA_CONTROL_ADMIN_KEY || "admin-dev-e2e";
+const LITELLM_MASTER = process.env.LITELLM_MASTER_KEY || "sk-hara-master-e2e";
+const MANAGED_MODELS = ["glm-mock", "glm-mock-pro"];
 
 const adminReq = (p, b, m = "POST") =>
   fetch(`${CTRL}${p}`, { method: m, headers: { "content-type": "application/json", "x-admin-key": ADMIN }, body: b ? JSON.stringify(b) : undefined });
-const chat = (key) =>
+const chat = (key, model = MANAGED_MODELS[0]) =>
   fetch(`${LITELLM}/v1/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model: "glm-mock", messages: [{ role: "user", content: "hi" }] }),
+    body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }] }),
   });
 const ok = (c, m) => { if (!c) throw new Error(`assertion failed: ${m}`); };
 const POLICY = {
@@ -76,6 +78,10 @@ export async function run() {
     "enroll minted a real LiteLLM key",
   );
   ok(policyMatches(enr.access_policy), "enroll returned the enforced access policy");
+  ok(
+    JSON.stringify(enr.available_models) === JSON.stringify(MANAGED_MODELS),
+    "one enrolled key exposes the complete managed-model catalog",
+  );
   const expiresInMs = Date.parse(enr.expires_at) - Date.now();
   ok(expiresInMs > 23 * 60 * 60_000 && expiresInMs <= 24 * 60 * 60_000, "device key uses the one-day lifetime");
   console.log("  · enrolled a one-day key with 5h/7d/30d budgets and RPM/TPM limits");
@@ -88,12 +94,51 @@ export async function run() {
   ok(row?.rpm_limit === POLICY.rpmLimit && row?.tpm_limit === POLICY.tpmLimit, "fleet exposes RPM/TPM limits");
   ok(budgetsMatch(row?.budget_limits), "fleet exposes the same rolling budget policy");
 
-  // the minted key works against the gateway -> mock upstream
-  r = await chat(enr.device_token);
-  ok(r.ok, `chat with minted key -> ${r.status}`);
-  const content = (await r.json())?.choices?.[0]?.message?.content || "";
-  ok(/mock upstream/i.test(content), `gateway proxied to upstream (got: ${JSON.stringify(content)})`);
-  console.log(`  · chat ok, upstream said: ${JSON.stringify(content)}`);
+  // The same minted key works through both authorized routes.
+  for (const model of MANAGED_MODELS) {
+    r = await chat(enr.device_token, model);
+    ok(r.ok, `chat with minted key on ${model} -> ${r.status}`);
+    const content = (await r.json())?.choices?.[0]?.message?.content || "";
+    ok(/mock upstream/i.test(content), `gateway proxied ${model} to upstream (got: ${JSON.stringify(content)})`);
+  }
+  console.log("  · the same device key works on both managed models");
+
+  // Reproduce a pre-0.1.15 single-model key, then prove heartbeat expands it in place. The client keeps
+  // exactly the same raw token throughout; Control looks up only LiteLLM's private one-way identifier.
+  r = await fetch(`${LITELLM}/key/update`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${LITELLM_MASTER}`,
+    },
+    body: JSON.stringify({ key: enr.device_token, models: [MANAGED_MODELS[0]] }),
+  });
+  ok(r.ok, `shrink test key to legacy scope -> ${r.status}`);
+  r = await chat(enr.device_token, MANAGED_MODELS[1]);
+  ok(!r.ok, `legacy-scoped key rejects the second model before heartbeat (got ${r.status})`);
+
+  r = await fetch(`${CTRL}/v1/heartbeat`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${enr.device_token}`,
+    },
+    body: JSON.stringify({
+      device_id: enr.device_id,
+      name: "mac",
+      os: "darwin",
+      hara_version: "0.134.2",
+    }),
+  });
+  ok(r.ok, `heartbeat reconciles legacy key -> ${r.status}`);
+  const heartbeat = await r.json();
+  ok(
+    JSON.stringify(heartbeat.available_models) === JSON.stringify(MANAGED_MODELS),
+    "heartbeat returns the restored two-model catalog",
+  );
+  r = await chat(enr.device_token, MANAGED_MODELS[1]);
+  ok(r.ok, `same token reaches the second model after heartbeat -> ${r.status}`);
+  console.log("  · legacy single-model scope expanded in place; raw device key stayed unchanged");
 
   // Positive synthetic pricing on glm-mock proves budget accounting changes after a real request.
   let spendRow;

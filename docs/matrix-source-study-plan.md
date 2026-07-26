@@ -9,20 +9,25 @@
 
 ## 1. 当前研究工作区
 
-已完成第一阶段仓库准备：
+已完成只读研究工作区和四个固定源码快照：
 
 ```text
-/Volumes/Jeff2TEXTEND1/github/chat-research/
-└── synapse/
+/Volumes/Jeff2TEXTEND1/projects/github/hara-chat-research/
+├── sources/synapse/
+├── sources/matrix-spec/
+├── sources/element-web/
+└── sources/matrix-js-sdk/
 ```
 
-当前 Synapse：
+当前快照：
 
 ```text
-repository: https://github.com/element-hq/synapse.git
-clone: shallow + partial
-commit: 97fb38eca66f74c4a761e1b1b394e4d19486e61b
-size: approximately 54 MiB
+synapse develop:       97fb38eca66f74c4a761e1b1b394e4d19486e61b
+matrix-spec main:      d0ba2aaef801e0134a4e5c6054a2c2f41bb55531
+element-web develop:   402c385d24395d453eed9c86d4418280baaec327
+matrix-js-sdk locked:  08ea484e3b24ab82d0158e1c86aa67ca20d0862b
+clone style:           shallow, no dependencies installed
+recorded total size:   approximately 191 MiB
 ```
 
 这是一个固定源码快照。研究文档必须记录提交 SHA，后续升级快照时不能把旧结论无条件套到新代码。
@@ -39,20 +44,17 @@ Hara，任何需要复用实现的情况必须先做单独许可审查。
 
 ## 2. 仓库顺序
 
-不要一次下载并扫描全部项目。严格按下面顺序：
+仓库已经按下面顺序固定；研究仍严格按该顺序分会话进行：
 
 1. **Synapse**：房间 → 消息事件 → 权限 → 存储 → Sync；
 2. **Matrix Spec**：解释协议为什么要求源码这样实现；
 3. **Element Web + 它锁定的 matrix-js-sdk 版本**：客户端状态、时间线、本地回显和窗口同步；
 4. **Hara 映射**：把可复用概念转成中心化 NestJS/PostgreSQL 设计。
 
-完成 Synapse 的 00–05 文档后再下载 Matrix Spec；完成服务端地图后再下载 Element Web。
-下载 Element Web 后，从其 lockfile/manifest 确认准确的 `matrix-js-sdk` 版本，不用任意最新版本做比较。
-
-目标目录最终可以是：
+源码目录为：
 
 ```text
-/Volumes/Jeff2TEXTEND1/github/chat-research/
+/Volumes/Jeff2TEXTEND1/projects/github/hara-chat-research/sources/
 ├── synapse/
 ├── matrix-spec/
 ├── element-web/
@@ -81,7 +83,14 @@ hara-control/docs/study/matrix/
 
 ## 3. 每次 Codex 会话的约束
 
-第三方源码根目录后续可以放置下面的 `AGENTS.md`。目前尚未写入外置磁盘仓库，先把规范保存在此：
+外置盘研究根目录已经建立独立 Git 仓库和 `AGENTS.md`；`sources/**` 永远只读且被外层仓库忽略。
+从研究根目录启动：
+
+```bash
+codex -C /Volumes/Jeff2TEXTEND1/projects/github/hara-chat-research
+```
+
+其核心约束如下：
 
 ```md
 # Repository study instructions

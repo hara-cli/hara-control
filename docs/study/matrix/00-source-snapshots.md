@@ -9,7 +9,7 @@
 | Field | Value |
 | --- | --- |
 | Upstream | `https://github.com/element-hq/synapse.git` |
-| Local path | `/Volumes/Jeff2TEXTEND1/github/chat-research/synapse` |
+| Local path | `/Volumes/Jeff2TEXTEND1/projects/github/hara-chat-research/sources/synapse` |
 | Commit | `97fb38eca66f74c4a761e1b1b394e4d19486e61b` |
 | Commit time | `2026-07-24T16:39:04-05:00` |
 | Commit subject | `Return M_USER_LIMIT_EXCEEDED error code for media upload limits from MSC4335 (#18876)` |
@@ -36,15 +36,17 @@ These anchors were verified in the pinned snapshot. They are starting points, no
 | Locked membership update | `synapse/handlers/room_member.py::RoomMemberHandler.update_membership_locked` |
 | Event authorisation | `synapse/event_auth.py` |
 
-## Pending snapshots
+## Additional snapshots
 
-The following repositories are intentionally not cloned yet:
+| Repository | Branch / selection | Commit | Local path |
+| --- | --- | --- | --- |
+| Matrix Spec | `main` | `d0ba2aaef801e0134a4e5c6054a2c2f41bb55531` | `/Volumes/Jeff2TEXTEND1/projects/github/hara-chat-research/sources/matrix-spec` |
+| Element Web | `develop` | `402c385d24395d453eed9c86d4418280baaec327` | `/Volumes/Jeff2TEXTEND1/projects/github/hara-chat-research/sources/element-web` |
+| matrix-js-sdk | Element lockfile revision, detached | `08ea484e3b24ab82d0158e1c86aa67ca20d0862b` | `/Volumes/Jeff2TEXTEND1/projects/github/hara-chat-research/sources/matrix-js-sdk` |
 
-| Repository | Trigger |
-| --- | --- |
-| Matrix Spec | After Synapse message/storage/sync/membership maps are complete |
-| Element Web | After the server-side map and spec crosswalk are complete |
-| matrix-js-sdk | After reading Element Web's manifest/lockfile to select its exact SDK revision |
+All four repositories are shallow, clean source snapshots. Dependencies are not
+installed. The research root is a separate Git repository whose `.gitignore`
+excludes `sources/`.
 
 See [`../../matrix-source-study-plan.md`](../../matrix-source-study-plan.md) for the staged process.
 

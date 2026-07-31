@@ -6,9 +6,9 @@
   "license": "Apache-2.0",
   "type": "commonjs",
   "scripts": {
-    "build": "nest build",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx watch src/main.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "node scripts/recover-known-failed-migration.mjs && prisma migrate deploy",
@@ -27,7 +27,6 @@
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
-    "@nestjs/cli": "^11.0.0",
     "@nestjs/testing": "^11.1.28",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
@@ -36,12 +35,6 @@
     "typescript": "^5.7.0"
   },
   "overrides": {
-    "minimatch@3.1.5": {
-      "brace-expansion": "1.1.16"
-    },
-    "minimatch@10.2.5": {
-      "brace-expansion": "5.0.7"
-    },
     "fast-uri": "3.1.4",
     "js-yaml": "4.3.0"
   }

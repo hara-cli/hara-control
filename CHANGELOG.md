@@ -16,6 +16,8 @@ All notable changes to hara-control are documented in this file.
   responses, and keep upstream errors and enrollment secrets out of audit records.
 - Roll back the model key, device record, and one-time code if configured Desk provisioning fails, and
   record a sanitized compensating audit event instead of leaving a partially enrolled organization.
+- Remove the unused Nest CLI build wrapper and invoke TypeScript/tsx directly, eliminating its vulnerable
+  brace-expansion development dependency while retaining clean builds, production start, and watch mode.
 
 ## 0.1.15 - 2026-07-24
 

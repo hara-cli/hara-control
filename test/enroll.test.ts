@@ -8,6 +8,7 @@ import { MockGatewayAdapter } from "../src/gateway/mock.adapter";
 import type { GatewayAdapter } from "../src/gateway/gateway-adapter";
 import type { PrismaService } from "../src/prisma/prisma.service";
 import type { AuditService } from "../src/audit/audit.service";
+import type { DeskProvisioner } from "../src/enroll/desk-provisioner";
 
 type Code = {
   id: string;
@@ -107,8 +108,16 @@ const fakeEntitlement = { assert: () => {}, seatCheck: async () => {} } as unkno
 const svcFor = (
   prisma: ReturnType<typeof fakePrisma>,
   gateway: GatewayAdapter = new MockGatewayAdapter(),
+  deskProvisioner?: DeskProvisioner,
+  audit: AuditService = fakeAudit,
 ) =>
-  new EnrollService(prisma as unknown as PrismaService, fakeAudit, gateway, fakeEntitlement);
+  new EnrollService(
+    prisma as unknown as PrismaService,
+    audit,
+    gateway,
+    fakeEntitlement,
+    deskProvisioner,
+  );
 
 test("enroll: valid code -> device token; code is single-use", async () => {
   const prisma = fakePrisma();
@@ -126,6 +135,137 @@ test("enroll: valid code -> device token; code is single-use", async () => {
   assert.equal(res.expires_at, prisma.db.tokens[0].expiresAt.toISOString(), "client and control plane use the gateway expiry");
 
   await assert.rejects(() => svc.enroll("hara-good", { name: "mac2", os: "darwin", hara_version: "0.68.0" }), /expired|bad/i, "code can't be reused");
+});
+
+test("enroll: configured organization returns model access and a separate Desk binding together", async () => {
+  const prisma = fakePrisma();
+  prisma.db.codes.set("hara-bundle", {
+    id: "c-bundle",
+    orgId: "o-bundle",
+    code: "hara-bundle",
+    model: "glm-5",
+    baseUrl: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    usedAt: null,
+  });
+  let provisionInput: { orgId: string; owner: string; deviceName: string } | undefined;
+  const deskProvisioner = {
+    provision: async (input: { orgId: string; owner: string; deviceName: string }) => {
+      provisionInput = input;
+      return {
+        url: "https://desk.example.test",
+        agent_id: "desk-device-1",
+        owner: input.owner,
+        token: "separate-desk-bearer",
+      };
+    },
+  } as unknown as DeskProvisioner;
+  const result = await svcFor(
+    prisma,
+    new MockGatewayAdapter(),
+    deskProvisioner,
+  ).enroll("hara-bundle", {
+    name: "bundle-mac",
+    os: "darwin",
+    hara_version: "0.136.0",
+  });
+
+  assert.equal(result.device_id, prisma.db.tokens[0].deviceId);
+  assert.deepEqual(result.desk, {
+    url: "https://desk.example.test",
+    agent_id: "desk-device-1",
+    owner: "bundle-mac",
+    token: "separate-desk-bearer",
+  });
+  assert.deepEqual(provisionInput, {
+    orgId: "o-bundle",
+    owner: "bundle-mac",
+    deviceName: "bundle-mac",
+  });
+});
+
+test("enroll: a Desk provisioning failure rolls back model access, restores the code, and audits the rollback", async () => {
+  const prisma = fakePrisma();
+  prisma.db.codes.set("hara-desk-retry", {
+    id: "c-desk-retry",
+    orgId: "o-desk-retry",
+    code: "hara-desk-retry",
+    model: "glm-5",
+    baseUrl: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    usedAt: null,
+  });
+  const auditEvents: Array<{
+    action: string;
+    actorType: string;
+    actorId: string;
+    payload: Record<string, unknown>;
+  }> = [];
+  const audit = {
+    log: async (
+      _orgId: string,
+      action: string,
+      actorType: string,
+      actorId: string,
+      payload: Record<string, unknown>,
+    ) => {
+      auditEvents.push({ action, actorType, actorId, payload });
+    },
+  } as unknown as AuditService;
+  const deskProvisioner = {
+    provision: async () => {
+      throw new Error("Desk rejected server-held-secret-value");
+    },
+  } as unknown as DeskProvisioner;
+
+  await assert.rejects(
+    () => svcFor(
+      prisma,
+      new MockGatewayAdapter(),
+      deskProvisioner,
+      audit,
+    ).enroll(
+      "hara-desk-retry",
+      { name: "bundle-mac", os: "darwin", hara_version: "0.136.0" },
+    ),
+    /Desk rejected/,
+  );
+
+  assert.equal(prisma.db.devices.size, 0);
+  assert.equal(prisma.db.tokens.length, 0);
+  assert.equal(prisma.db.codes.get("hara-desk-retry")?.usedAt, null);
+  assert.deepEqual(
+    auditEvents.map(({ action, actorType, payload }) => ({
+      action,
+      actorType,
+      payload,
+    })),
+    [
+      {
+        action: "enroll",
+        actorType: "device",
+        payload: {
+          name: "bundle-mac",
+          os: "darwin",
+          accessPolicy: auditEvents[0].payload.accessPolicy,
+        },
+      },
+      {
+        action: "enroll.rollback",
+        actorType: "system",
+        payload: {
+          gatewayRevoked: true,
+          deviceRemoved: true,
+          codeRestored: true,
+        },
+      },
+    ],
+  );
+  assert.equal(
+    JSON.stringify(auditEvents).includes("server-held-secret-value"),
+    false,
+    "rollback audit never records the upstream error or secret",
+  );
 });
 
 test("enroll: applies and persists the admin-issued lifetime, rolling budgets, RPM, and TPM", async () => {

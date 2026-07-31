@@ -2,6 +2,21 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.16 - 2026-07-31
+
+### Added
+
+- Let an organization optionally bundle Hara Desk into the same one-time Control enrollment. Control
+  keeps the shared Desk enrollment secret server-side and returns a separately scoped per-device Desk
+  bearer, so employees configure the organization once and receive its model route and Desk together.
+
+### Security
+
+- Validate organization Desk origins, reject redirects and credential-bearing URLs, bound registration
+  responses, and keep upstream errors and enrollment secrets out of audit records.
+- Roll back the model key, device record, and one-time code if configured Desk provisioning fails, and
+  record a sanitized compensating audit event instead of leaving a partially enrolled organization.
+
 ## 0.1.15 - 2026-07-24
 
 ### Fixed

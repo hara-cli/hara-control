@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { GATEWAY_ADAPTER, GatewayAdapter, IssuedKey } from "../gateway/gateway-adapter";
@@ -21,6 +27,7 @@ import {
   gatewayLimits,
   parseStoredAccessKeyPolicy,
 } from "../gateway/key-policy";
+import { DeskProvisioner } from "./desk-provisioner";
 
 @Injectable()
 export class EnrollService {
@@ -31,6 +38,7 @@ export class EnrollService {
     private readonly audit: AuditService,
     @Inject(GATEWAY_ADAPTER) private readonly gateway: GatewayAdapter,
     private readonly entitlement: EntitlementService,
+    @Optional() private readonly deskProvisioner?: DeskProvisioner,
   ) {}
 
   /** Exchange a one-time code for a scoped device token (a gateway virtual key). */
@@ -68,6 +76,7 @@ export class EnrollService {
 
     let dev: { id: string } | null = null;
     let issued: IssuedKey | null = null;
+    let enrollmentAuditRecorded = false;
     try {
       dev = await this.prisma.device.create({
         data: {
@@ -107,6 +116,21 @@ export class EnrollService {
         os: device.os,
         accessPolicy,
       });
+      enrollmentAuditRecorded = true;
+      // Desk is an optional organization service, but when configured it is part of this same
+      // enrollment boundary. Control holds the shared Desk enrollment secret and returns only the
+      // newly minted, separately scoped device bearer to the CLI.
+      const person = ec.personId
+        ? await this.prisma.person.findUnique({
+            where: { id: ec.personId },
+            select: { email: true },
+          })
+        : null;
+      const desk = await this.deskProvisioner?.provision({
+        orgId: ec.orgId,
+        owner: person?.email || device.name,
+        deviceName: device.name,
+      });
 
       return {
         device_token: issued.key,
@@ -117,13 +141,18 @@ export class EnrollService {
         base_url: ec.baseUrl ?? undefined,
         expires_at: issued.expiresAt.toISOString(),
         access_policy: accessPolicy,
+        ...(desk ? { desk } : {}),
       };
     } catch (error) {
       // External key issue + local writes cannot be one database transaction. Compensate every
       // completed boundary so an uncertain failure neither strands an alias nor consumes a code.
+      let gatewayRevoked = !issued;
+      let deviceRemoved = !dev;
+      let codeRestored = false;
       if (issued) {
         try {
           await this.gateway.revokeKey(issued.keyId);
+          gatewayRevoked = true;
         } catch (cleanupError) {
           this.log.error(
             `failed to compensate gateway key for device ${dev?.id ?? "uncreated"}: ${(cleanupError as Error).message}`,
@@ -133,6 +162,7 @@ export class EnrollService {
       if (dev) {
         try {
           await this.prisma.device.delete({ where: { id: dev.id } });
+          deviceRemoved = true;
         } catch (cleanupError) {
           this.log.error(
             `failed to remove incomplete device ${dev.id}: ${(cleanupError as Error).message}`,
@@ -141,14 +171,32 @@ export class EnrollService {
       }
       try {
         // Compare against our exact claim timestamp so cleanup cannot release a later claim.
-        await this.prisma.enrollCode.updateMany({
+        const restored = await this.prisma.enrollCode.updateMany({
           where: { id: ec.id, usedAt: now },
           data: { usedAt: null },
         });
+        codeRestored = restored.count === 1;
       } catch (cleanupError) {
         this.log.error(
           `failed to restore enrollment code state for device ${dev?.id ?? "uncreated"}: ${(cleanupError as Error).message}`,
         );
+      }
+      if (enrollmentAuditRecorded) {
+        try {
+          // The original append-only event must remain, so record the rollback explicitly. Keep
+          // this payload status-only: the originating error can contain an upstream secret.
+          await this.audit.log(
+            ec.orgId,
+            "enroll.rollback",
+            "system",
+            dev?.id ?? "",
+            { gatewayRevoked, deviceRemoved, codeRestored },
+          );
+        } catch (cleanupError) {
+          this.log.error(
+            `failed to audit enrollment rollback for device ${dev?.id ?? "uncreated"}: ${(cleanupError as Error).message}`,
+          );
+        }
       }
       throw error;
     }

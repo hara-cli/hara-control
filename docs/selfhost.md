@@ -121,6 +121,21 @@ UPSTREAM_API_KEY=<regular pay-as-you-go key — NEVER a coding-plan key>
 HARA_SSRF_BLOCK_PRIVATE=1                          # recommended for multi-host
 ```
 
+### Optional: enroll the organization Desk at the same time
+
+If an organization has Hara Desk, Control can keep its shared enrollment secret server-side and
+mint a separate per-device Desk bearer during the same `/v1/enroll` request:
+
+```env
+HARA_DESK_PROVISIONING_JSON={"<org-id>":{"url":"https://desk.example.com","enrollKey":"<secret>"}}
+```
+
+Store the real JSON in the deployment secret manager or protected `.env`; never commit it. Desk URLs
+must be HTTPS origins (loopback HTTP is allowed only for development), redirects are rejected, and
+outbound hosts remain SSRF-checked. The enrolling user still enters only the Hara Control one-time
+code. The CLI stores the model token and Desk token in separate protected files and Desktop never
+receives either raw secret.
+
 ---
 
 ## ③ Configure a domain

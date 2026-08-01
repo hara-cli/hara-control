@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { AssetKind, AssetScope } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
@@ -7,6 +7,11 @@ import { EmbeddingService } from "../embed/embedding.service";
 import { sha256 } from "../common/crypto";
 import { assertTokenUsable } from "../security/token-discipline";
 import { redactSecrets, scanForInjection } from "./guard";
+import {
+  assertAssetLifecycleState,
+  normalizeGrantedCapabilities,
+  normalizeRequiredCapabilities,
+} from "./skill-capabilities";
 
 // Recall precedence among server-side scopes (the device merges its local project scope on top).
 // More-local wins: personal > team = org > public.
@@ -21,6 +26,7 @@ export type ContributeInput = {
   summary?: string;
   lang?: string;
   tags?: string[];
+  requiredCapabilities?: string[];
   body: string;
 };
 
@@ -57,24 +63,48 @@ export class AssetsService {
     const { text: body, redactions } = redactSecrets(input.body);
     const tags = input.tags ?? [];
     const title = input.title ?? input.slug;
+    const requiredCapabilities = normalizeRequiredCapabilities(
+      input.kind,
+      input.requiredCapabilities,
+    );
 
-    // dedup: one (orgId,scope,teamId,kind,slug) → new version on the existing asset, not a fork
-    const existing = await this.prisma.asset.findFirst({
-      where: { orgId, scope: input.scope, teamId: input.teamId ?? null, kind: input.kind, slug: input.slug },
-    });
     const summary = input.summary ?? null;
-    const asset = existing
-      ? await this.prisma.asset.update({ where: { id: existing.id }, data: { lifecycle: "IN_REVIEW", title, summary, lang: input.lang ?? null, tags } })
-      : await this.prisma.asset.create({
-          data: {
-            orgId, scope: input.scope, teamId: input.teamId ?? null, kind: input.kind, slug: input.slug,
-            title, summary, lang: input.lang ?? null, tags, lifecycle: "IN_REVIEW", origin: "AUTHORED", ownerDeviceId: device.id,
-          },
-        });
-    const version = await this.prisma.assetVersion.create({
-      data: { assetId: asset.id, body, contentHash: sha256(body), redactions, createdByDeviceId: device.id },
+    // Keep the lifecycle update and immutable version append atomic. Otherwise
+    // a reviewer could observe IN_REVIEW while the old version is still latest.
+    const { asset, version } = await this.prisma.$transaction(async (transaction) => {
+      // dedup: one (orgId,scope,teamId,kind,slug) → a new version, not a fork
+      const existing = await transaction.asset.findFirst({
+        where: { orgId, scope: input.scope, teamId: input.teamId ?? null, kind: input.kind, slug: input.slug },
+      });
+      const nextAsset = existing
+        ? await transaction.asset.update({ where: { id: existing.id }, data: { lifecycle: "IN_REVIEW", title, summary, lang: input.lang ?? null, tags } })
+        : await transaction.asset.create({
+            data: {
+              orgId, scope: input.scope, teamId: input.teamId ?? null, kind: input.kind, slug: input.slug,
+              title, summary, lang: input.lang ?? null, tags, lifecycle: "IN_REVIEW", origin: "AUTHORED", ownerDeviceId: device.id,
+            },
+          });
+      const nextVersion = await transaction.assetVersion.create({
+        data: {
+          assetId: nextAsset.id,
+          body,
+          contentHash: sha256(body),
+          redactions,
+          createdByDeviceId: device.id,
+          requiredCapabilities,
+          grantedCapabilities: [],
+        },
+      });
+      return { asset: nextAsset, version: nextVersion };
     });
-    await this.audit.log(orgId, "asset.contribute", "device", device.id, { assetId: asset.id, scope: input.scope, kind: input.kind, slug: input.slug, redactions });
+    await this.audit.log(orgId, "asset.contribute", "device", device.id, {
+      assetId: asset.id,
+      scope: input.scope,
+      kind: input.kind,
+      slug: input.slug,
+      redactions,
+      requiredCapabilities,
+    });
     return { asset_id: asset.id, version_id: version.id, state: asset.lifecycle, redactions };
   }
 
@@ -94,6 +124,8 @@ export class AssetsService {
     return assets.map((a) => ({
       id: a.id, kind: a.kind, scope: a.scope, slug: a.slug, team_id: a.teamId,
       content_hash: a.versions[0]?.contentHash ?? "", updated_at: a.updatedAt,
+      required_capabilities: a.versions[0]?.requiredCapabilities ?? [],
+      granted_capabilities: a.versions[0]?.grantedCapabilities ?? [],
     }));
   }
 
@@ -104,7 +136,16 @@ export class AssetsService {
       include: { versions: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     if (!asset?.versions[0]) throw new NotFoundException("asset not found or not published");
-    return { id: asset.id, kind: asset.kind, scope: asset.scope, slug: asset.slug, body: asset.versions[0].body, content_hash: asset.versions[0].contentHash };
+    return {
+      id: asset.id,
+      kind: asset.kind,
+      scope: asset.scope,
+      slug: asset.slug,
+      body: asset.versions[0].body,
+      content_hash: asset.versions[0].contentHash,
+      required_capabilities: asset.versions[0].requiredCapabilities,
+      granted_capabilities: asset.versions[0].grantedCapabilities,
+    };
   }
 
   /** Hybrid search: lexical word-match ⊕ vector ANN (pgvector, when an embedder is configured),
@@ -177,23 +218,84 @@ export class AssetsService {
   }
 
   // ── admin: review / promote / deprecate (egress + lifecycle governance) ─────────────────
-  async review(assetId: string, decision: "approve" | "reject") {
+  async review(
+    assetId: string,
+    decision: "approve" | "reject",
+    grantedCapabilities: readonly string[] = [],
+  ) {
     this.entitlement.assert("code-assets");
     const asset = await this.prisma.asset.findUnique({ where: { id: assetId }, include: { versions: { orderBy: { createdAt: "desc" }, take: 1 } } });
     if (!asset) throw new NotFoundException("asset not found");
+    assertAssetLifecycleState(asset.lifecycle, "IN_REVIEW", "Asset review");
     if (decision === "reject") {
-      await this.prisma.asset.update({ where: { id: assetId }, data: { lifecycle: "DRAFT" } });
+      const rejected = await this.prisma.asset.updateMany({
+        where: {
+          id: assetId,
+          lifecycle: "IN_REVIEW",
+          updatedAt: asset.updatedAt,
+        },
+        data: { lifecycle: "DRAFT" },
+      });
+      if (rejected.count !== 1) {
+        throw new ConflictException(
+          "The asset changed during review; reload the latest version",
+        );
+      }
       await this.audit.log(asset.orgId, "asset.review", "admin", assetId, { decision });
       return { lifecycle: "DRAFT" };
     }
-    const body = asset.versions[0]?.body ?? "";
+    const version = asset.versions[0];
+    if (!version) throw new NotFoundException("asset version not found");
+    const approvedCapabilities = normalizeGrantedCapabilities(
+      asset.kind,
+      version.requiredCapabilities,
+      grantedCapabilities,
+    );
+    const body = version.body;
+    const publishScan = scanForInjection(body);
+    if (!publishScan.ok) {
+      throw new BadRequestException(
+        `blocked on publish: ${publishScan.hits.join(", ")}`,
+      );
+    }
+    if (redactSecrets(body).redactions.length > 0) {
+      throw new BadRequestException(
+        "blocked on publish: asset version contains secret-shaped content and must be resubmitted",
+      );
+    }
     const haystack = this.searchTextFor(asset.title, asset.summary, asset.tags, asset.lang, body);
-    await this.prisma.asset.update({
-      where: { id: assetId },
-      data: { lifecycle: "PUBLISHED", searchText: haystack },
+    await this.prisma.$transaction(async (transaction) => {
+      const published = await transaction.asset.updateMany({
+        where: {
+          id: assetId,
+          lifecycle: "IN_REVIEW",
+          updatedAt: asset.updatedAt,
+        },
+        data: { lifecycle: "PUBLISHED", searchText: haystack },
+      });
+      const reviewed = await transaction.assetVersion.updateMany({
+        where: {
+          id: version.id,
+          assetId,
+          reviewedAt: null,
+        },
+        data: {
+          grantedCapabilities: approvedCapabilities,
+          reviewedAt: new Date(),
+        },
+      });
+      if (published.count !== 1 || reviewed.count !== 1) {
+        throw new ConflictException(
+          "The asset changed during review; reload the latest version",
+        );
+      }
     });
-    if (asset.versions[0]) await this.embedOnPublish(asset.versions[0].id, haystack);
-    await this.audit.log(asset.orgId, "asset.review", "admin", assetId, { decision });
+    await this.embedOnPublish(version.id, haystack);
+    await this.audit.log(asset.orgId, "asset.review", "admin", assetId, {
+      decision,
+      versionId: version.id,
+      grantedCapabilities: approvedCapabilities,
+    });
     return { lifecycle: "PUBLISHED" };
   }
 
@@ -202,6 +304,7 @@ export class AssetsService {
     this.entitlement.assert("code-assets");
     const src = await this.prisma.asset.findUnique({ where: { id: assetId }, include: { versions: { orderBy: { createdAt: "desc" }, take: 1 } } });
     if (!src?.versions[0]) throw new NotFoundException("asset/version not found");
+    assertAssetLifecycleState(src.lifecycle, "PUBLISHED", "Asset promotion");
     const scan = scanForInjection(src.versions[0].body);
     if (!scan.ok) throw new BadRequestException(`blocked on promote: ${scan.hits.join(", ")}`);
     const { text: redacted, redactions } = redactSecrets(src.versions[0].body);
@@ -211,15 +314,39 @@ export class AssetsService {
         title: src.title, lang: src.lang, tags: src.tags, lifecycle: "IN_REVIEW", origin: "PROMOTED", promotedFromId: src.id,
       },
     });
-    await this.prisma.assetVersion.create({ data: { assetId: promoted.id, body: redacted, contentHash: sha256(redacted), redactions } });
+    await this.prisma.assetVersion.create({
+      data: {
+        assetId: promoted.id,
+        body: redacted,
+        contentHash: sha256(redacted),
+        redactions,
+        requiredCapabilities: src.versions[0].requiredCapabilities,
+        grantedCapabilities: [],
+      },
+    });
     await this.audit.log(src.orgId, "asset.promote", "admin", promoted.id, { from: assetId, fromScope: src.scope, toScope });
     return { asset_id: promoted.id, state: "in_review" };
   }
 
   async deprecate(assetId: string, supersededById?: string) {
     this.entitlement.assert("code-assets");
-    const asset = await this.prisma.asset.update({ where: { id: assetId }, data: { lifecycle: "DEPRECATED", supersededById: supersededById ?? null } });
-    await this.audit.log(asset.orgId, "asset.deprecate", "admin", assetId, { supersededById });
+    const current = await this.prisma.asset.findUnique({ where: { id: assetId } });
+    if (!current) throw new NotFoundException("asset not found");
+    assertAssetLifecycleState(current.lifecycle, "PUBLISHED", "Asset deprecation");
+    const deprecated = await this.prisma.asset.updateMany({
+      where: {
+        id: assetId,
+        lifecycle: "PUBLISHED",
+        updatedAt: current.updatedAt,
+      },
+      data: { lifecycle: "DEPRECATED", supersededById: supersededById ?? null },
+    });
+    if (deprecated.count !== 1) {
+      throw new ConflictException(
+        "The asset changed during deprecation; reload the latest version",
+      );
+    }
+    await this.audit.log(current.orgId, "asset.deprecate", "admin", assetId, { supersededById });
     return { lifecycle: "DEPRECATED" };
   }
 }

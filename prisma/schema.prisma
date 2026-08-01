@@ -395,6 +395,11 @@ model AssetVersion {
   redactions      String[] @default([]) // what the guard stripped on contribute (audit)
   createdByDeviceId String?
   createdAt       DateTime @default(now())
+  // Skills declare the exact capabilities they need. Reviewers grant an explicit subset;
+  // a new immutable version starts with no grants so old approval never leaks forward.
+  requiredCapabilities String[] @default([])
+  grantedCapabilities  String[] @default([])
+  reviewedAt            DateTime?
   // semantic search (P0). dim is unbounded so the embedding model is configurable (local/remote);
   // {embedModel,embedDim} track which model produced it so search only compares like-for-like.
   embedding       Unsupported("vector")?

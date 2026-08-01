@@ -10,6 +10,7 @@ export class ContributeDto {
   @IsString() @IsOptional() summary?: string;
   @IsString() @IsOptional() lang?: string;
   @IsArray() @IsString({ each: true }) @IsOptional() tags?: string[];
+  @IsArray() @IsString({ each: true }) @IsOptional() requiredCapabilities?: string[];
   @IsString() @IsNotEmpty() body!: string;
 }
 
@@ -21,6 +22,7 @@ export class SearchDto {
 
 export class ReviewDto {
   @IsIn(["approve", "reject"]) decision!: "approve" | "reject";
+  @IsArray() @IsString({ each: true }) @IsOptional() grantedCapabilities?: string[];
 }
 
 export class PromoteDto {

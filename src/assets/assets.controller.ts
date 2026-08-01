@@ -41,7 +41,7 @@ export class AssetsAdminController {
 
   @Post(":id/review")
   review(@Param("id") id: string, @Body() dto: ReviewDto) {
-    return this.assets.review(id, dto.decision);
+    return this.assets.review(id, dto.decision, dto.grantedCapabilities);
   }
 
   @Post(":id/promote")

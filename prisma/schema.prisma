@@ -89,6 +89,7 @@ model EnrollCode {
   usedAt    DateTime?             // single-use: set when redeemed
   createdAt DateTime  @default(now())
   tokenTtlMinutes Int?            // lifetime of the issued internal key; null keeps the operator default
+  tokenNeverExpires Boolean @default(false) // explicit SUPERADMIN-only exception; still budgeted + revocable
   budgetLimits    Json      @default("[]") // rolling 5h / 7d / 30d USD windows, validated by the control plane
   rpmLimit        Int?            // optional data-plane requests-per-minute ceiling
   tpmLimit        Int?            // optional data-plane tokens-per-minute ceiling

@@ -2,6 +2,27 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.17 - 2026-08-05
+
+### Added
+
+- Let a SUPERADMIN explicitly issue a non-expiring personal device Key. The Key has no fixed
+  date-based cutoff but remains restricted to the managed-model catalog, visible in fleet and usage
+  reporting, governed by rolling budgets and rate limits, and immediately revocable.
+- Add the same explicit lifetime choice to the administrator console with clear permanent-versus-
+  finite status in English, Simplified Chinese, and Traditional Chinese.
+- Persist reviewed skill capability declarations and grants per immutable asset version, and deny any
+  execution capability that was not both declared by the skill and granted during review.
+
+### Security
+
+- Restrict non-expiring Key issuance to SUPERADMIN/shared-superadmin callers, reject conflicting
+  finite and non-expiring lifetime fields, and require LiteLLM to confirm an authoritative null expiry
+  before enrollment succeeds. Raw virtual Keys remain one-time delivery secrets; Control stores only
+  their hashes and non-secret aliases.
+- Keep one-time enrollment codes independently short-lived and single-use even when the resulting
+  device Key is non-expiring.
+
 ## 0.1.16 - 2026-07-31
 
 ### Added

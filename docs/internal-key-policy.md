@@ -1,15 +1,16 @@
 # Internal key access policy
 
-Hara Control issues a short-lived, revocable LiteLLM virtual key when a colleague exchanges a one-time
-enrollment code. An administrator can attach an immutable access policy to that code before handing it
-out. The raw virtual key is returned once to the device; Hara Control stores only its SHA-256 hash and
-the non-secret gateway key identifier.
+Hara Control issues a revocable LiteLLM virtual key when a colleague exchanges a one-time enrollment
+code. Finite expiry remains the default. A SUPERADMIN may explicitly issue a non-expiring personal key;
+it remains model-scoped, budgeted, observable, and manually revocable. The raw virtual key is returned
+once to the device; Hara Control stores only its SHA-256 hash and the non-secret gateway key identifier.
 
 ## Supported limits
 
 | Control field | Meaning | Data-plane value |
 |---|---|---|
 | `tokenTtlMinutes` | Key lifetime; 5 minutes through 365 days | LiteLLM key `duration` |
+| `tokenNeverExpires` | SUPERADMIN-only explicit no-expiry policy; cannot be combined with `tokenTtlMinutes` | LiteLLM `duration: null` |
 | `budgetLimits[].window = "5h"` | Maximum USD spend in each rolling 5-hour window | `5h` |
 | `budgetLimits[].window = "week"` | Maximum USD spend in each rolling 7-day window | `7d` |
 | `budgetLimits[].window = "month"` | Maximum USD spend in each rolling 30-day window | `30d` |
@@ -21,6 +22,11 @@ not calendar-week or calendar-month accounting. Up to one limit per window can b
 time. Omitting a budget or rate field leaves that dimension unlimited; the default key lifetime remains
 seven days. Every limit applies to the device key as a whole, aggregated across all models used through
 that one managed connection.
+
+Non-expiring is not the same as unlimited. The key has no automatic date-based cutoff, but every rolling
+budget and rate limit continues to reset and enforce normally, its usage remains visible in the fleet and
+usage views, and an administrator can revoke it immediately. Only a SUPERADMIN (or the deployment's
+back-compatible shared superadmin credential) may set `tokenNeverExpires: true`.
 
 ## Create a limited enrollment code
 
@@ -53,6 +59,10 @@ without replacing the key.
 The response returns the one-time code, its exchange expiry, and the normalized `accessPolicy`. Treat the
 code as a credential: deliver it only to its intended colleague, never put it in chat logs, and let it be
 consumed once.
+
+For an explicitly non-expiring key, omit `tokenTtlMinutes` and send `"tokenNeverExpires": true`. Sending
+both fields is rejected. The one-time enrollment code still has its own short exchange deadline; only the
+device key created after redemption has no fixed expiry.
 
 ## Enforcement and failure behavior
 

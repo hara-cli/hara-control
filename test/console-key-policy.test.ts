@@ -26,11 +26,14 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
     "enroll.model.detail.flash",
     "enroll.model.detail.pro",
     "enroll.policy.token_days",
+    "enroll.policy.never_expires",
+    "enroll.policy.never_expires.hint",
     "enroll.policy.budgets",
     "enroll.policy.window.5h",
     "enroll.policy.window.week",
     "enroll.policy.window.month",
     "enroll.result.policy",
+    "enroll.result.policy.never_expires",
     "fleet.col.policy",
     "fleet.policy.rates",
     "fleet.policy.rates_unlimited",
@@ -43,6 +46,8 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
   const html = readFileSync(join(root, "public", "console", "index.html"), "utf8");
   for (const id of [
     "ec-token-days",
+    "ec-never-expires",
+    "ec-never-expires-wrap",
     "ec-model",
     "ec-model-hint",
     "ec-budget-5h",
@@ -62,7 +67,7 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
 test("console JavaScript parses and sends the enforced policy fields to the enroll endpoint", () => {
   const app = readFileSync(join(root, "public", "console", "app.js"), "utf8");
   assert.doesNotThrow(() => new Function(app));
-  for (const field of ["tokenTtlMinutes", "budgetLimits", "rpmLimit", "tpmLimit"]) {
+  for (const field of ["tokenTtlMinutes", "tokenNeverExpires", "budgetLimits", "rpmLimit", "tpmLimit"]) {
     assert.match(app, new RegExp(`\\b${field}\\b`));
   }
   assert.match(app, /\/admin\/enroll-codes/);

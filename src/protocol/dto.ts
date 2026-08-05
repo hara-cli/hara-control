@@ -5,6 +5,7 @@ import { Type } from "class-transformer";
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -67,6 +68,7 @@ export class CreateEnrollCodeDto {
   @IsString() @IsOptional() baseUrl?: string;
   @IsInt() @Min(1) @IsOptional() ttlMinutes?: number;
   @IsInt() @Min(MIN_TOKEN_TTL_MINUTES) @Max(MAX_TOKEN_TTL_MINUTES) @IsOptional() tokenTtlMinutes?: number;
+  @IsBoolean() @IsOptional() tokenNeverExpires?: boolean;
   @IsArray() @ArrayMaxSize(3) @ValidateNested({ each: true }) @Type(() => AccessBudgetLimitDto) @IsOptional()
   budgetLimits?: AccessBudgetLimitDto[];
   @IsInt() @Min(1) @Max(MAX_RPM_LIMIT) @IsOptional() rpmLimit?: number;

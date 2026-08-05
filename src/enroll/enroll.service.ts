@@ -53,6 +53,7 @@ export class EnrollService {
     const accessPolicy = parseStoredAccessKeyPolicy(
       {
         tokenTtlMinutes: ec.tokenTtlMinutes,
+        tokenNeverExpires: ec.tokenNeverExpires,
         budgetLimits: ec.budgetLimits,
         rpmLimit: ec.rpmLimit,
         tpmLimit: ec.tpmLimit,
@@ -88,7 +89,9 @@ export class EnrollService {
           personId: ec.personId ?? null, // per-person enroll: inherit this person's digital employees
         },
       });
-      const requestedExpiry = deviceTokenExpiry(now, process.env, accessPolicy.tokenTtlMinutes);
+      const requestedExpiry = accessPolicy.tokenNeverExpires
+        ? null
+        : deviceTokenExpiry(now, process.env, accessPolicy.tokenTtlMinutes ?? undefined);
       issued = await this.gateway.issueKey({
         model: resolvedModel,
         models: availableModels,
@@ -139,7 +142,7 @@ export class EnrollService {
         available_models: availableModels,
         thinking_efforts: managedModelsThinkingEfforts(availableModels),
         base_url: ec.baseUrl ?? undefined,
-        expires_at: issued.expiresAt.toISOString(),
+        expires_at: issued.expiresAt?.toISOString() ?? null,
         access_policy: accessPolicy,
         ...(desk ? { desk } : {}),
       };

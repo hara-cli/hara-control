@@ -19,6 +19,7 @@ type Code = {
   expiresAt: Date;
   usedAt: Date | null;
   tokenTtlMinutes?: number | null;
+  tokenNeverExpires?: boolean;
   budgetLimits?: unknown;
   rpmLimit?: number | null;
   tpmLimit?: number | null;
@@ -30,7 +31,7 @@ type Tok = {
   tokenHash: string;
   gatewayKeyId: string;
   model: string;
-  expiresAt: Date;
+  expiresAt: Date | null;
   revokedAt: Date | null;
   budgetLimits?: unknown;
   rpmLimit?: number | null;
@@ -323,6 +324,52 @@ test("enroll: applies and persists the admin-issued lifetime, rolling budgets, R
   assert.equal(prisma.db.tokens[0].rpmLimit, 30);
   assert.equal(prisma.db.tokens[0].tpmLimit, 120_000);
   assert.deepEqual(prisma.db.tokens[0].budgetLimits, result.access_policy.budgetLimits);
+});
+
+test("enroll: explicitly non-expiring personal keys remain budgeted, visible, and revocable", async () => {
+  const prisma = fakePrisma();
+  const now = new Date("2026-08-05T03:00:00Z");
+  prisma.db.codes.set("hara-personal", {
+    id: "c-personal",
+    orgId: "o1",
+    code: "hara-personal",
+    model: "deepseek-v4-flash",
+    baseUrl: null,
+    expiresAt: new Date("2026-08-12T03:00:00Z"),
+    usedAt: null,
+    tokenTtlMinutes: null,
+    tokenNeverExpires: true,
+    budgetLimits: [{ window: "month", maxUsd: 100, budgetDuration: "30d" }],
+    rpmLimit: null,
+    tpmLimit: null,
+  });
+  let issuedOpts: Parameters<GatewayAdapter["issueKey"]>[0] | null = null;
+  const delegate = new MockGatewayAdapter();
+  const gateway = {
+    issueKey: async (opts: Parameters<GatewayAdapter["issueKey"]>[0]) => {
+      issuedOpts = opts;
+      return delegate.issueKey(opts);
+    },
+    syncKeyModels: (keyId: string, models: string[]) => delegate.syncKeyModels(keyId, models),
+    revokeKey: (keyId: string) => delegate.revokeKey(keyId),
+    listSpend: (keyIds: string[]) => delegate.listSpend(keyIds),
+    usage: () => delegate.usage(),
+    readiness: () => delegate.readiness(),
+  } satisfies GatewayAdapter;
+
+  const result = await svcFor(prisma, gateway).enroll(
+    "hara-personal",
+    { name: "personal-mac", os: "darwin", hara_version: "0.139.0" },
+    now,
+  );
+
+  assert.equal(issuedOpts!.expiresAt, null);
+  assert.equal(result.expires_at, null);
+  assert.equal(prisma.db.tokens[0].expiresAt, null);
+  assert.equal(result.access_policy.tokenNeverExpires, true);
+  assert.deepEqual(issuedOpts!.limits, {
+    budgetLimits: [{ budgetDuration: "30d", maxBudgetUsd: 100 }],
+  });
 });
 
 test("formal managed enrollment and heartbeat expose both models on the same unchanged device key", async () => {

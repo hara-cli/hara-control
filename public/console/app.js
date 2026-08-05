@@ -277,8 +277,11 @@
       // SUPERADMIN gets the Users nav item; others don't even see it
       if (me.role === "SUPERADMIN") {
         $("#nav-users").classList.remove("hidden");
+        $("#ec-never-expires-wrap").classList.remove("hidden");
       } else {
         $("#nav-users").classList.add("hidden");
+        $("#ec-never-expires-wrap").classList.add("hidden");
+        $("#ec-never-expires").checked = false;
       }
 
       showApp();
@@ -958,7 +961,9 @@
     if (!policy) return "—";
     const days = Number(policy.tokenTtlMinutes ?? 0) / (24 * 60);
     const lines = [
-      I18N.t("enroll.result.policy.validity", { days: Number.isInteger(days) ? days : days.toFixed(2) }),
+      policy.tokenNeverExpires
+        ? I18N.t("enroll.result.policy.never_expires")
+        : I18N.t("enroll.result.policy.validity", { days: Number.isInteger(days) ? days : days.toFixed(2) }),
       I18N.t("enroll.result.policy.budgets", { budgets: formatBudgetSummary(policy.budgetLimits) }),
     ];
     const rates = [];
@@ -968,6 +973,11 @@
     return lines.join("\n");
   }
 
+  $("#ec-never-expires").addEventListener("change", (event) => {
+    const enabled = event.currentTarget.checked;
+    $("#ec-token-days").disabled = enabled;
+  });
+
   $("#ec-create").addEventListener("click", async () => {
     const orgId = $("#ec-orgid").value.trim();
     const model = $("#ec-model").value.trim();
@@ -975,7 +985,10 @@
     if (!orgId) { toast(I18N.t("err.orgid_required"), "err"); return; }
     if (!model) { toast(I18N.t("err.model_required"), "err"); return; }
     try {
-      const tokenDays = readOptionalPositiveNumber("#ec-token-days", { integer: true, max: 365 }) ?? 7;
+      const tokenNeverExpires = me?.role === "SUPERADMIN" && $("#ec-never-expires").checked;
+      const tokenDays = tokenNeverExpires
+        ? undefined
+        : readOptionalPositiveNumber("#ec-token-days", { integer: true, max: 365 }) ?? 7;
       const budgetLimits = [
         ["5h", "#ec-budget-5h"],
         ["week", "#ec-budget-week"],
@@ -989,7 +1002,9 @@
       const r = await api("POST", "/admin/enroll-codes", {
         orgId,
         model,
-        tokenTtlMinutes: tokenDays * 24 * 60,
+        ...(tokenNeverExpires
+          ? { tokenNeverExpires: true }
+          : { tokenTtlMinutes: tokenDays * 24 * 60 }),
         budgetLimits,
         rpmLimit,
         tpmLimit,

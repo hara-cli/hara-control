@@ -29,7 +29,7 @@ export function liteLLMKeyIssuePayload(opts: {
   model: string;
   models?: string[];
   alias: string;
-  expiresAt: Date;
+  expiresAt: Date | null;
   metadata?: Record<string, unknown>;
   limits?: GatewayKeyLimits;
 }, now = new Date()): Record<string, unknown> {
@@ -38,7 +38,9 @@ export function liteLLMKeyIssuePayload(opts: {
   return {
     models,
     key_alias: opts.alias,
-    duration: liteLLMKeyDuration(opts.expiresAt, now),
+    // LiteLLM 1.92 defines null as a non-expiring key. Keep it explicit rather than relying on an
+    // omitted-field default so the requested lifecycle is visible at the data-plane boundary.
+    duration: opts.expiresAt == null ? null : liteLLMKeyDuration(opts.expiresAt, now),
     metadata: opts.metadata ?? {},
     ...(limits?.budgetLimits.length
       ? {
@@ -281,7 +283,7 @@ export class LiteLLMAdapter implements GatewayAdapter {
     model: string;
     models?: string[];
     alias: string;
-    expiresAt: Date;
+    expiresAt: Date | null;
     metadata?: Record<string, unknown>;
     limits?: GatewayKeyLimits;
   }): Promise<IssuedKey> {
@@ -310,11 +312,13 @@ export class LiteLLMAdapter implements GatewayAdapter {
       throw error;
     }
     const key = typeof j.key === "string" ? j.key : "";
-    const gatewayExpiry = new Date(typeof j.expires === "string" ? j.expires : "");
-    const expiryIsValid =
-      Number.isFinite(gatewayExpiry.getTime()) &&
-      gatewayExpiry.getTime() > startedAt.getTime() &&
-      gatewayExpiry.getTime() <= expiresAt.getTime() + 5_000;
+    const gatewayExpiry = typeof j.expires === "string" ? new Date(j.expires) : null;
+    const expiryIsValid = expiresAt == null
+      ? Object.hasOwn(j, "expires") && j.expires === null
+      : gatewayExpiry != null &&
+        Number.isFinite(gatewayExpiry.getTime()) &&
+        gatewayExpiry.getTime() > startedAt.getTime() &&
+        gatewayExpiry.getTime() <= expiresAt.getTime() + 5_000;
     if (!key || !expiryIsValid || !liteLLMResponseConfirmsLimits(j, limits)) {
       // The key may already exist even if LiteLLM returned a malformed lifecycle response.
       // Revoke by our non-secret alias before failing closed.

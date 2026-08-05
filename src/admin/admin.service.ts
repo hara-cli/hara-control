@@ -93,6 +93,7 @@ export class AdminService {
         personId: personId ?? null,
         expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
         tokenTtlMinutes: accessPolicy.tokenTtlMinutes,
+        tokenNeverExpires: accessPolicy.tokenNeverExpires,
         budgetLimits: accessPolicy.budgetLimits as unknown as Prisma.InputJsonValue,
         rpmLimit: accessPolicy.rpmLimit,
         tpmLimit: accessPolicy.tpmLimit,

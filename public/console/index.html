@@ -394,6 +394,15 @@
                 <input class="input" id="ec-token-days" type="number" min="1" max="365" step="1" value="7" inputmode="numeric">
                 <div class="field__hint" data-i18n="enroll.policy.token_days.hint">The colleague must re-enroll after this period.</div>
               </div>
+              <div class="field hidden" id="ec-never-expires-wrap">
+                <label class="policy-choice" for="ec-never-expires">
+                  <input id="ec-never-expires" type="checkbox">
+                  <span>
+                    <strong data-i18n="enroll.policy.never_expires">Never expire this key</strong>
+                    <small data-i18n="enroll.policy.never_expires.hint">SUPERADMIN only. Spend limits, usage visibility, and manual revocation still apply.</small>
+                  </span>
+                </label>
+              </div>
               <div class="field">
                 <span class="field__label" data-i18n="enroll.policy.budgets">Rolling spend limits (USD)</span>
                 <div class="quota-grid">

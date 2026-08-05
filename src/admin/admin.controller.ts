@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { AdminRole } from "@prisma/client";
 import { AdminService } from "./admin.service";
 import { AdminAuthGuard, assertAdminOrgAccess, AuthedUser } from "../common/admin-auth.guard";
@@ -51,7 +51,11 @@ export class AdminController {
 
   @Post("enroll-codes")
   createEnrollCode(@Req() req: { user?: AuthedUser }, @Body() dto: CreateEnrollCodeDto) {
-    assertAdminOrgAccess(req.user!, dto.orgId);
+    const user = req.user!;
+    assertAdminOrgAccess(user, dto.orgId);
+    if (dto.tokenNeverExpires && user.role !== AdminRole.SUPERADMIN && !user.viaSharedKey) {
+      throw new ForbiddenException("non-expiring keys require SUPERADMIN");
+    }
     return this.admin.createEnrollCode(
       dto.orgId,
       dto.model,
@@ -60,6 +64,7 @@ export class AdminController {
       dto.personId,
       {
         tokenTtlMinutes: dto.tokenTtlMinutes,
+        tokenNeverExpires: dto.tokenNeverExpires,
         budgetLimits: dto.budgetLimits,
         rpmLimit: dto.rpmLimit,
         tpmLimit: dto.tpmLimit,

@@ -38,7 +38,8 @@ v1 hardening status is:
   `src/security/ssrf.ts`, wired into the LiteLLM + embeddings calls.
 - ✅ **Tamper-evident audit** — per-org hash-chained `AuditLog` + `verify()` (`GET /admin/audit/verify`).
   Signed checkpoints are the deferred enterprise extension.
-- ✅ **Token discipline** — short TTL (`expiresAt`, default 7d), server-side revocation checks, and
+- ✅ **Token discipline** — finite TTL by default (`expiresAt`, default 7d), an explicit
+  SUPERADMIN-only non-expiring exception that remains budgeted and revocable, server-side revocation checks, and
   LiteLLM-enforced 5-hour / 7-day / 30-day rolling USD budgets plus optional RPM/TPM limits. The
   gateway must expose positive model pricing and confirm every requested limit before enrollment succeeds;
   otherwise the uncertain key is revoked and the exchange fails closed. See

@@ -237,6 +237,78 @@ test("LiteLLM key generation carries all budget windows and rate limits to the d
   );
 });
 
+test("LiteLLM sends and verifies an explicit null lifecycle for a non-expiring managed key", () => {
+  assert.deepEqual(
+    liteLLMKeyIssuePayload({
+      model: "deepseek-v4-flash",
+      models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+      alias: "personal-device",
+      expiresAt: null,
+      metadata: { orgId: "org-1" },
+      limits: { budgetLimits: [{ budgetDuration: "30d", maxBudgetUsd: 100 }] },
+    }),
+    {
+      models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+      key_alias: "personal-device",
+      duration: null,
+      metadata: { orgId: "org-1" },
+      budget_limits: [{ budget_duration: "30d", max_budget: 100 }],
+    },
+  );
+});
+
+test("LiteLLM accepts null expiry only when the gateway confirms the same non-expiring lifecycle", async () => {
+  const adapter = new LiteLLMAdapter({} as never);
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  (adapter as any).get = async () => pricedModels;
+  (adapter as any).call = async (path: string, body: Record<string, unknown>) => {
+    calls.push({ path, body });
+    return {
+      key: "synthetic-key",
+      expires: null,
+      budget_limits: [{ budget_duration: "30d", max_budget: 100 }],
+    };
+  };
+
+  assert.deepEqual(
+    await adapter.issueKey({
+      model: "deepseek-v4-flash",
+      alias: "personal-device",
+      expiresAt: null,
+      limits: { budgetLimits: [{ budgetDuration: "30d", maxBudgetUsd: 100 }] },
+    }),
+    { key: "synthetic-key", keyId: "personal-device", expiresAt: null },
+  );
+  assert.equal(calls[0].path, "/key/generate");
+  assert.equal(calls[0].body.duration, null);
+});
+
+test("LiteLLM fails closed and revokes when a non-expiring response omits its expiry confirmation", async () => {
+  const adapter = new LiteLLMAdapter({} as never);
+  const calls: string[] = [];
+  (adapter as any).get = async () => pricedModels;
+  (adapter as any).call = async (path: string) => {
+    calls.push(path);
+    return path === "/key/generate"
+      ? {
+          key: "synthetic-key",
+          budget_limits: [{ budget_duration: "30d", max_budget: 100 }],
+        }
+      : {};
+  };
+
+  await assert.rejects(
+    adapter.issueKey({
+      model: "deepseek-v4-flash",
+      alias: "personal-device",
+      expiresAt: null,
+      limits: { budgetLimits: [{ budgetDuration: "30d", maxBudgetUsd: 100 }] },
+    }),
+    /invalid or unenforced key-policy response/,
+  );
+  assert.deepEqual(calls, ["/key/generate", "/key/delete"]);
+});
+
 test("LiteLLM expands an existing device alias in place without requiring the raw virtual key", async () => {
   const hashedToken = "a".repeat(64);
   let reads = 0;

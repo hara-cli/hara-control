@@ -11,8 +11,8 @@ export interface IssuedKey {
   key: string;
   /** stable id we use to revoke later (we key off an alias we set, not the raw key) */
   keyId: string;
-  /** authoritative data-plane expiry returned by the gateway */
-  expiresAt: Date;
+  /** authoritative data-plane expiry returned by the gateway; null means explicitly non-expiring */
+  expiresAt: Date | null;
 }
 
 export interface SpendRecord {
@@ -56,7 +56,7 @@ export interface GatewayAdapter {
     /** Complete authorized model catalog for this one device key. */
     models?: string[];
     alias: string;
-    expiresAt: Date;
+    expiresAt: Date | null;
     metadata?: Record<string, unknown>;
     limits?: GatewayKeyLimits;
   }): Promise<IssuedKey>;

@@ -38,8 +38,31 @@ test("access-key policy rejects duplicate, invalid, or unsafe limits", () => {
     /duplicate/,
   );
   assert.throws(() => normalizeAccessKeyPolicy({ tokenTtlMinutes: 1 }, 10_080), /tokenTtlMinutes/);
+  assert.throws(
+    () => normalizeAccessKeyPolicy({ tokenNeverExpires: true, tokenTtlMinutes: 10_080 }, 10_080),
+    /cannot be combined/,
+  );
   assert.throws(() => normalizeAccessKeyPolicy({ rpmLimit: 1.5 }, 10_080), /rpmLimit/);
   assert.throws(() => normalizeAccessKeyPolicy({ budgetLimits: [{ window: "week", maxUsd: 0 }] }, 10_080), /maxUsd/);
+});
+
+test("access-key policy represents explicit non-expiry without dropping budgets or revocation metadata", () => {
+  assert.deepEqual(
+    normalizeAccessKeyPolicy(
+      {
+        tokenNeverExpires: true,
+        budgetLimits: [{ window: "month", maxUsd: 100 }],
+      },
+      10_080,
+    ),
+    {
+      tokenTtlMinutes: null,
+      tokenNeverExpires: true,
+      budgetLimits: [{ window: "month", maxUsd: 100, budgetDuration: "30d" }],
+      rpmLimit: null,
+      tpmLimit: null,
+    },
+  );
 });
 
 test("stored access-key policy ignores untrusted duration text and recomputes the canonical window", () => {

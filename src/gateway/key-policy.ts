@@ -23,7 +23,9 @@ export interface StoredAccessBudgetLimit extends AccessBudgetLimitInput {
 }
 
 export interface StoredAccessKeyPolicy {
-  tokenTtlMinutes: number;
+  /** null only when a SUPERADMIN explicitly requested a non-expiring, still-revocable key. */
+  tokenTtlMinutes: number | null;
+  tokenNeverExpires: boolean;
   budgetLimits: StoredAccessBudgetLimit[];
   rpmLimit: number | null;
   tpmLimit: number | null;
@@ -31,6 +33,7 @@ export interface StoredAccessKeyPolicy {
 
 export interface AccessKeyPolicyInput {
   tokenTtlMinutes?: number;
+  tokenNeverExpires?: boolean;
   budgetLimits?: AccessBudgetLimitInput[];
   rpmLimit?: number;
   tpmLimit?: number;
@@ -60,15 +63,23 @@ export function normalizeAccessKeyPolicy(
   input: AccessKeyPolicyInput,
   defaultTokenTtlMinutes: number,
 ): StoredAccessKeyPolicy {
-  const tokenTtlMinutes = input.tokenTtlMinutes ?? defaultTokenTtlMinutes;
-  if (
-    !Number.isSafeInteger(tokenTtlMinutes) ||
-    tokenTtlMinutes < MIN_TOKEN_TTL_MINUTES ||
-    tokenTtlMinutes > MAX_TOKEN_TTL_MINUTES
-  ) {
-    throw new Error(
-      `tokenTtlMinutes must be a whole number between ${MIN_TOKEN_TTL_MINUTES} and ${MAX_TOKEN_TTL_MINUTES}`,
-    );
+  const tokenNeverExpires = input.tokenNeverExpires === true;
+  if (tokenNeverExpires && input.tokenTtlMinutes != null) {
+    throw new Error("tokenNeverExpires cannot be combined with tokenTtlMinutes");
+  }
+  const tokenTtlMinutes = tokenNeverExpires
+    ? null
+    : input.tokenTtlMinutes ?? defaultTokenTtlMinutes;
+  if (tokenTtlMinutes != null) {
+    if (
+      !Number.isSafeInteger(tokenTtlMinutes) ||
+      tokenTtlMinutes < MIN_TOKEN_TTL_MINUTES ||
+      tokenTtlMinutes > MAX_TOKEN_TTL_MINUTES
+    ) {
+      throw new Error(
+        `tokenTtlMinutes must be a whole number between ${MIN_TOKEN_TTL_MINUTES} and ${MAX_TOKEN_TTL_MINUTES}`,
+      );
+    }
   }
 
   const source = input.budgetLimits ?? [];
@@ -94,6 +105,7 @@ export function normalizeAccessKeyPolicy(
 
   return {
     tokenTtlMinutes,
+    tokenNeverExpires,
     budgetLimits,
     rpmLimit: finiteInteger(input.rpmLimit, "rpmLimit", MAX_RPM_LIMIT),
     tpmLimit: finiteInteger(input.tpmLimit, "tpmLimit", MAX_TPM_LIMIT),
@@ -113,6 +125,7 @@ export function gatewayLimits(policy: StoredAccessKeyPolicy): GatewayKeyLimits {
 
 export function parseStoredAccessKeyPolicy(input: {
   tokenTtlMinutes: number | null;
+  tokenNeverExpires?: boolean;
   budgetLimits: unknown;
   rpmLimit: number | null;
   tpmLimit: number | null;
@@ -120,7 +133,9 @@ export function parseStoredAccessKeyPolicy(input: {
   const rawLimits = Array.isArray(input.budgetLimits) ? input.budgetLimits : [];
   return normalizeAccessKeyPolicy(
     {
-      tokenTtlMinutes: input.tokenTtlMinutes ?? defaultTokenTtlMinutes,
+      ...(input.tokenNeverExpires
+        ? { tokenNeverExpires: true }
+        : { tokenTtlMinutes: input.tokenTtlMinutes ?? defaultTokenTtlMinutes }),
       budgetLimits: rawLimits.map((entry) => {
         if (!entry || typeof entry !== "object") throw new Error("stored budget limit is malformed");
         const row = entry as Record<string, unknown>;

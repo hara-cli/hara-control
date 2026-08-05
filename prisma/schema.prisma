@@ -47,6 +47,33 @@ enum OrgUnitType {
   TEAM // 组
 }
 
+/// Optional organization services installed by one Hara Control enrollment. Public descriptors
+/// are stored here; credentials live separately in the envelope-encrypted Secret store and are
+/// referenced only by an opaque logical name.
+enum TenantServiceKind {
+  MODEL_CONTROL
+  DESK_TASKS
+  COLLAB
+  EXTENSION_CATALOG
+}
+
+enum TenantServiceMode {
+  HARA_HOSTED
+  CUSTOMER_HOSTED
+}
+
+enum TenantServiceRegion {
+  CN
+  GLOBAL
+}
+
+enum TenantServiceStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  DEGRADED
+  DISABLED
+}
+
 /// An org unit — a node in a typed, self-referential tree (集团 → 公司 → 部门 → 组). Pre-existing rows
 /// default to COMPANY roots (parentId null), so single-company mode keeps working unchanged. Governance
 /// (`policy`) inherits DOWN the tree: a department inherits its company's setting unless it overrides
@@ -73,8 +100,36 @@ model Organization {
   assets           Asset[]
   workSessions     WorkSession[]
   workEvents       WorkEvent[]
+  serviceBindings  TenantServiceBinding[]
 
   @@index([parentId])
+}
+
+/// One organization-level service connection. Changing any public connection field returns the
+/// row to PENDING_VERIFICATION; only an explicit server-side probe may make it ACTIVE. Enrollment
+/// responses include ACTIVE descriptors only and never expose credentialRef.
+model TenantServiceBinding {
+  id                  String              @id @default(uuid()) @db.Uuid
+  org                 Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId               String
+  service             TenantServiceKind
+  mode                TenantServiceMode
+  accountRegion       TenantServiceRegion @map("account_region")
+  apiOrigin           String              @map("api_origin") @db.VarChar(2048)
+  issuer              String?             @db.VarChar(2048)
+  jwksUri             String?             @map("jwks_uri") @db.VarChar(2048)
+  audience            String?             @db.VarChar(160)
+  credentialRef       String?             @map("credential_ref") @db.VarChar(256)
+  status              TenantServiceStatus @default(PENDING_VERIFICATION)
+  capabilitiesVersion Int                 @default(1) @map("capabilities_version")
+  configVersion       Int                 @default(1) @map("config_version")
+  verifiedAt          DateTime?           @map("verified_at") @db.Timestamptz(6)
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([orgId, service])
+  @@index([orgId, status])
+  @@map("tenant_service_bindings")
 }
 
 /// One-time enrollment code an admin hands to a machine. Exchanged at POST /v1/enroll.

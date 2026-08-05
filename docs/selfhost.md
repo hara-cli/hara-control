@@ -126,6 +126,21 @@ HARA_SSRF_BLOCK_PRIVATE=1                          # recommended for multi-host
 If an organization has Hara Desk, Control can keep its shared enrollment secret server-side and
 mint a separate per-device Desk bearer during the same `/v1/enroll` request:
 
+1. Open **Console → Organizations → Organization services**.
+2. Choose the organization and `Desk tasks`.
+3. Enter the Desk HTTPS origin and enrollment credential, then **Save as pending**.
+4. Select **Verify and activate**. Control checks `/health`, confirms that the encrypted credential
+   remains readable, and only then includes this service in new enrollments.
+
+The credential is stored in the existing tenant-bound KMS envelope store. The list API, enrollment
+descriptor, audit chain and console never return it. Updating a route or credential resets the
+connection to `PENDING_VERIFICATION`; disabling it stops future enrollment delivery without falsely
+claiming that already-issued remote Desk credentials were revoked.
+
+The environment mapping below remains a compatibility fallback for deployments created before the
+organization-service registry. New deployments should use the administrator UI so each tenant has
+an independently versioned and visible connection state:
+
 ```env
 HARA_DESK_PROVISIONING_JSON={"<org-id>":{"url":"https://desk.example.com","enrollKey":"<secret>"}}
 ```
@@ -135,6 +150,11 @@ must be HTTPS origins (loopback HTTP is allowed only for development), redirects
 outbound hosts remain SSRF-checked. The enrolling user still enters only the Hara Control one-time
 code. The CLI stores the model token and Desk token in separate protected files and Desktop never
 receives either raw secret.
+
+The same registry also supports `COLLAB`, `MODEL_CONTROL`, and `EXTENSION_CATALOG` descriptors.
+Collab requires an Account issuer, JWKS URL and audience; the service becomes active only after both
+its readiness endpoint and public JWKS pass validation. One `/v1/enroll` response can therefore
+return the model route, a separately scoped Desk credential, and redacted active-service descriptors.
 
 ---
 

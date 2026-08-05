@@ -28,6 +28,7 @@ import {
   parseStoredAccessKeyPolicy,
 } from "../gateway/key-policy";
 import { DeskProvisioner } from "./desk-provisioner";
+import { TenantServiceBindingsService } from "../service-bindings/service-bindings.service";
 
 @Injectable()
 export class EnrollService {
@@ -39,6 +40,7 @@ export class EnrollService {
     @Inject(GATEWAY_ADAPTER) private readonly gateway: GatewayAdapter,
     private readonly entitlement: EntitlementService,
     @Optional() private readonly deskProvisioner?: DeskProvisioner,
+    @Optional() private readonly serviceBindings?: TenantServiceBindingsService,
   ) {}
 
   /** Exchange a one-time code for a scoped device token (a gateway virtual key). */
@@ -129,6 +131,9 @@ export class EnrollService {
             select: { email: true },
           })
         : null;
+      const serviceBindings = await this.serviceBindings?.activeForEnrollment(
+        ec.orgId,
+      ) ?? [];
       const desk = await this.deskProvisioner?.provision({
         orgId: ec.orgId,
         owner: person?.email || device.name,
@@ -144,6 +149,9 @@ export class EnrollService {
         base_url: ec.baseUrl ?? undefined,
         expires_at: issued.expiresAt?.toISOString() ?? null,
         access_policy: accessPolicy,
+        ...(serviceBindings.length > 0
+          ? { service_bindings: serviceBindings }
+          : {}),
         ...(desk ? { desk } : {}),
       };
     } catch (error) {

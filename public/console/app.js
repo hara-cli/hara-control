@@ -225,6 +225,16 @@
         `<option value="${escapeHtml(org.id)}">${escapeHtml(org.name)} · ${escapeHtml(org.type)}</option>`).join("");
     const preferred = previous || (me && me.orgId) || (orgChoices.length === 1 ? orgChoices[0].id : "");
     if (preferred && orgChoices.some((org) => org.id === preferred)) select.value = preferred;
+
+    const serviceSelect = $("#service-orgid");
+    const previousServiceOrg = serviceSelect.value;
+    serviceSelect.innerHTML = `<option value="">${escapeHtml(I18N.t("orgs.services.org.choose"))}</option>` +
+      orgChoices.map((org) =>
+        `<option value="${escapeHtml(org.id)}">${escapeHtml(org.name)} · ${escapeHtml(org.type)}</option>`).join("");
+    const preferredServiceOrg = previousServiceOrg || (me && me.orgId) || (orgChoices.length === 1 ? orgChoices[0].id : "");
+    if (preferredServiceOrg && orgChoices.some((org) => org.id === preferredServiceOrg)) {
+      serviceSelect.value = preferredServiceOrg;
+    }
     if (me && me.orgId) {
       if (!$("#fleet-orgid").value) $("#fleet-orgid").value = me.orgId;
       if (!$("#ec-orgid").value) $("#ec-orgid").value = me.orgId;
@@ -399,7 +409,10 @@
     if (r === "fleet" && lastFleetRows) renderFleet();
     if (r === "usage" && lastUsageReport) renderUsage(lastUsageReport);
     if (r === "users") loadUsers();
-    if (r === "orgs" && lastInspectId) inspectOrg(lastInspectId);
+    if (r === "orgs") {
+      if (lastInspectId) inspectOrg(lastInspectId);
+      renderServiceBindings();
+    }
     if (r === "enroll") {
       if (managedModelCatalog) paintManagedModelCatalog();
       if (lastEnrollResult) paintEnrollResult(lastEnrollResult);
@@ -513,6 +526,163 @@
       });
     } catch (e) { toast(e.message, "err"); }
   }
+
+  let lastServiceBindings = null;
+
+  function serviceCopy(prefix, value) {
+    const key = `${prefix}.${value}`;
+    const translated = I18N.t(key);
+    return translated === key ? value : translated;
+  }
+
+  function syncServiceForm() {
+    const kind = $("#service-kind").value;
+    $("#service-credential-wrap").classList.toggle("hidden", kind !== "DESK_TASKS");
+    $("#service-trust-fields").classList.toggle("hidden", kind !== "COLLAB");
+  }
+
+  function fillServiceForm(binding) {
+    $("#service-kind").value = binding.service;
+    $("#service-mode").value = binding.mode;
+    $("#service-region").value = binding.accountRegion;
+    $("#service-origin").value = binding.apiOrigin || "";
+    $("#service-issuer").value = binding.issuer || "";
+    $("#service-jwks").value = binding.jwksUri || "";
+    $("#service-audience").value = binding.audience || "";
+    $("#service-capabilities-version").value = String(binding.capabilitiesVersion || 1);
+    $("#service-credential").value = "";
+    syncServiceForm();
+  }
+
+  function renderServiceBindings() {
+    const host = $("#service-bindings-list");
+    const orgId = $("#service-orgid").value;
+    if (!orgId) {
+      host.innerHTML = `<div class="muted small">${escapeHtml(I18N.t("orgs.services.empty.no_org"))}</div>`;
+      return;
+    }
+    if (!Array.isArray(lastServiceBindings)) {
+      host.innerHTML = `<div class="muted small">${escapeHtml(I18N.t("orgs.services.loading"))}</div>`;
+      return;
+    }
+    if (lastServiceBindings.length === 0) {
+      host.innerHTML = `<div class="muted small">${escapeHtml(I18N.t("orgs.services.empty"))}</div>`;
+      return;
+    }
+    host.innerHTML = `
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th>${escapeHtml(I18N.t("orgs.services.col.service"))}</th>
+            <th>${escapeHtml(I18N.t("orgs.services.col.route"))}</th>
+            <th>${escapeHtml(I18N.t("orgs.services.col.status"))}</th>
+            <th>${escapeHtml(I18N.t("orgs.services.col.config"))}</th>
+            <th>${escapeHtml(I18N.t("orgs.services.col.actions"))}</th>
+          </tr></thead>
+          <tbody>${lastServiceBindings.map((binding) => `
+            <tr class="${binding.status === "DISABLED" ? "row--disabled" : ""}">
+              <td>
+                <strong>${escapeHtml(serviceCopy("orgs.services.kind", binding.service))}</strong>
+                <div class="small muted">${escapeHtml(serviceCopy("orgs.services.mode", binding.mode))} · ${escapeHtml(serviceCopy("orgs.services.region", binding.accountRegion))}</div>
+              </td>
+              <td class="mono service-binding-origin">${escapeHtml(binding.apiOrigin)}</td>
+              <td><span class="pill ${binding.status === "ACTIVE" ? "pill--coral" : "pill--muted"}">${escapeHtml(serviceCopy("orgs.services.status", binding.status))}</span></td>
+              <td class="small">
+                v${escapeHtml(binding.configVersion)} · cap ${escapeHtml(binding.capabilitiesVersion)}
+                <div class="muted">${escapeHtml(binding.credentialConfigured ? I18N.t("orgs.services.credential.set") : I18N.t("orgs.services.credential.none"))}</div>
+              </td>
+              <td><button type="button" class="btn-link" data-service-edit="${escapeHtml(binding.service)}">${escapeHtml(I18N.t("orgs.services.edit"))}</button></td>
+            </tr>`).join("")}</tbody>
+        </table>
+      </div>`;
+  }
+
+  async function loadServiceBindings() {
+    const orgId = $("#service-orgid").value;
+    lastServiceBindings = null;
+    renderServiceBindings();
+    if (!orgId) return;
+    try {
+      const bindings = await api("GET", `/admin/orgs/${encodeURIComponent(orgId)}/service-bindings`);
+      lastServiceBindings = Array.isArray(bindings) ? bindings : [];
+      renderServiceBindings();
+    } catch (e) {
+      $("#service-bindings-list").innerHTML = "";
+      toast(e.message, "err");
+    }
+  }
+
+  async function saveServiceBinding() {
+    const orgId = $("#service-orgid").value;
+    const service = $("#service-kind").value;
+    const apiOrigin = $("#service-origin").value.trim();
+    const capabilitiesVersion = Number($("#service-capabilities-version").value);
+    if (!orgId) { toast(I18N.t("orgs.services.err.org"), "err"); return; }
+    if (!apiOrigin) { toast(I18N.t("orgs.services.err.origin"), "err"); return; }
+    const body = {
+      mode: $("#service-mode").value,
+      accountRegion: $("#service-region").value,
+      apiOrigin,
+      capabilitiesVersion,
+    };
+    if (service === "DESK_TASKS" && $("#service-credential").value) {
+      body.credential = $("#service-credential").value;
+    }
+    if (service === "COLLAB") {
+      body.issuer = $("#service-issuer").value.trim();
+      body.jwksUri = $("#service-jwks").value.trim();
+      body.audience = $("#service-audience").value.trim();
+    }
+    try {
+      await api(
+        "PUT",
+        `/admin/orgs/${encodeURIComponent(orgId)}/service-bindings/${encodeURIComponent(service)}`,
+        body,
+      );
+      $("#service-credential").value = "";
+      $("#service-action-out").textContent = I18N.t("orgs.services.saved");
+      toast(I18N.t("orgs.services.saved"), "ok");
+      await loadServiceBindings();
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  async function changeServiceState(action) {
+    const orgId = $("#service-orgid").value;
+    const service = $("#service-kind").value;
+    if (!orgId) { toast(I18N.t("orgs.services.err.org"), "err"); return; }
+    if (action === "disable" && !window.confirm(I18N.t("orgs.services.disable.confirm"))) return;
+    try {
+      const result = await api(
+        "POST",
+        `/admin/orgs/${encodeURIComponent(orgId)}/service-bindings/${encodeURIComponent(service)}/${action}`,
+      );
+      const message = action === "verify"
+        ? I18N.t("orgs.services.verified")
+        : I18N.t("orgs.services.disabled");
+      $("#service-action-out").textContent = message;
+      toast(message, "ok");
+      await loadServiceBindings();
+      fillServiceForm(result);
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  $("#service-kind").addEventListener("change", syncServiceForm);
+  $("#service-orgid").addEventListener("change", loadServiceBindings);
+  $("#service-refresh").addEventListener("click", loadServiceBindings);
+  $("#service-save").addEventListener("click", saveServiceBinding);
+  $("#service-verify").addEventListener("click", () => changeServiceState("verify"));
+  $("#service-disable").addEventListener("click", () => changeServiceState("disable"));
+  $("#service-bindings-list").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-service-edit]");
+    if (!button || !Array.isArray(lastServiceBindings)) return;
+    const binding = lastServiceBindings.find((entry) => entry.service === button.dataset.serviceEdit);
+    if (binding) fillServiceForm(binding);
+  });
+  syncServiceForm();
+  router.on("orgs", async () => {
+    await getOrgChoices().catch(() => undefined);
+    await loadServiceBindings();
+  });
 
   // ╔═══════════════════════════════════════════════════════════════════╗
   // ║ 10.  Fleet view                                                   ║

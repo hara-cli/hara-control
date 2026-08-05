@@ -184,6 +184,83 @@
           <p class="card__hint mt-2" data-i18n="overview.heartbeat.placeholder">Live ping not wired yet — gateway health surfaces in the sidebar.</p>
         </section>
       </div>
+
+      <section class="card mt-2 service-bindings">
+        <div class="flex ai-start jc-between gap-2 row--wrap">
+          <div>
+            <h2 class="card__title" data-i18n="orgs.services.section">Organization services</h2>
+            <p class="card__hint" data-i18n="orgs.services.hint">Connect model control, Desk, Groups, and reviewed extensions once per organization.</p>
+          </div>
+          <button type="button" class="btn-ghost" id="service-refresh" data-i18n="orgs.services.refresh">Refresh</button>
+        </div>
+
+        <div class="grid service-bindings__form mt-2">
+          <div class="field">
+            <label class="field__label" for="service-orgid" data-i18n="orgs.services.org">Organization</label>
+            <select class="select" id="service-orgid">
+              <option value="" data-i18n="orgs.services.org.choose">Choose an organization…</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field__label" for="service-kind" data-i18n="orgs.services.kind">Service</label>
+            <select class="select" id="service-kind">
+              <option value="DESK_TASKS" data-i18n="orgs.services.kind.DESK_TASKS">Desk tasks</option>
+              <option value="COLLAB" data-i18n="orgs.services.kind.COLLAB">Groups collaboration</option>
+              <option value="MODEL_CONTROL" data-i18n="orgs.services.kind.MODEL_CONTROL">Model control</option>
+              <option value="EXTENSION_CATALOG" data-i18n="orgs.services.kind.EXTENSION_CATALOG">Extension catalog</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field__label" for="service-mode" data-i18n="orgs.services.mode">Hosting</label>
+            <select class="select" id="service-mode">
+              <option value="HARA_HOSTED" data-i18n="orgs.services.mode.HARA_HOSTED">Hara hosted</option>
+              <option value="CUSTOMER_HOSTED" data-i18n="orgs.services.mode.CUSTOMER_HOSTED">Customer hosted</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field__label" for="service-region" data-i18n="orgs.services.region">Account region</label>
+            <select class="select" id="service-region">
+              <option value="CN" data-i18n="orgs.services.region.CN">China</option>
+              <option value="GLOBAL" data-i18n="orgs.services.region.GLOBAL">Global</option>
+            </select>
+          </div>
+          <div class="field service-bindings__wide">
+            <label class="field__label" for="service-origin" data-i18n="orgs.services.origin">API origin</label>
+            <input class="input input--mono" id="service-origin" type="url" placeholder="https://desk.example.com" autocomplete="off">
+          </div>
+          <div class="field" id="service-credential-wrap">
+            <label class="field__label" for="service-credential" data-i18n="orgs.services.credential">Desk enrollment credential</label>
+            <input class="input input--mono" id="service-credential" type="password" autocomplete="new-password" data-i18n-placeholder="orgs.services.credential.placeholder">
+            <div class="field__hint" data-i18n="orgs.services.credential.hint">Encrypted at rest. Leave blank to keep the current value.</div>
+          </div>
+          <div class="field">
+            <label class="field__label" for="service-capabilities-version" data-i18n="orgs.services.capabilities">Capabilities version</label>
+            <input class="input input--mono" id="service-capabilities-version" type="number" min="1" max="1000000" value="1">
+          </div>
+          <div class="service-bindings__trust hidden" id="service-trust-fields">
+            <div class="field">
+              <label class="field__label" for="service-issuer" data-i18n="orgs.services.issuer">Account issuer</label>
+              <input class="input input--mono" id="service-issuer" type="url" autocomplete="off" placeholder="https://account.example.com">
+            </div>
+            <div class="field">
+              <label class="field__label" for="service-jwks" data-i18n="orgs.services.jwks">JWKS URL</label>
+              <input class="input input--mono" id="service-jwks" type="url" autocomplete="off" placeholder="https://account.example.com/.well-known/jwks.json">
+            </div>
+            <div class="field">
+              <label class="field__label" for="service-audience" data-i18n="orgs.services.audience">Audience</label>
+              <input class="input input--mono" id="service-audience" type="text" autocomplete="off" placeholder="hara-collab">
+            </div>
+          </div>
+        </div>
+
+        <div class="flex gap-1 row--wrap mt-1">
+          <button type="button" class="btn" id="service-save" data-i18n="orgs.services.save">Save as pending</button>
+          <button type="button" class="btn-ghost" id="service-verify" data-i18n="orgs.services.verify">Verify and activate</button>
+          <button type="button" class="btn-ghost" id="service-disable" data-i18n="orgs.services.disable">Disable</button>
+        </div>
+        <div class="small mt-2" id="service-action-out" role="status"></div>
+        <div class="mt-2" id="service-bindings-list"></div>
+      </section>
     </section>
 
     <!-- ORGS -->

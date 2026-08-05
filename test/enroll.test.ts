@@ -9,6 +9,7 @@ import type { GatewayAdapter } from "../src/gateway/gateway-adapter";
 import type { PrismaService } from "../src/prisma/prisma.service";
 import type { AuditService } from "../src/audit/audit.service";
 import type { DeskProvisioner } from "../src/enroll/desk-provisioner";
+import type { TenantServiceBindingsService } from "../src/service-bindings/service-bindings.service";
 
 type Code = {
   id: string;
@@ -111,6 +112,7 @@ const svcFor = (
   gateway: GatewayAdapter = new MockGatewayAdapter(),
   deskProvisioner?: DeskProvisioner,
   audit: AuditService = fakeAudit,
+  serviceBindings?: TenantServiceBindingsService,
 ) =>
   new EnrollService(
     prisma as unknown as PrismaService,
@@ -118,6 +120,7 @@ const svcFor = (
     gateway,
     fakeEntitlement,
     deskProvisioner,
+    serviceBindings,
   );
 
 test("enroll: valid code -> device token; code is single-use", async () => {
@@ -183,6 +186,60 @@ test("enroll: configured organization returns model access and a separate Desk b
     owner: "bundle-mac",
     deviceName: "bundle-mac",
   });
+});
+
+test("enroll: one exchange returns only active redacted organization service descriptors", async () => {
+  const prisma = fakePrisma();
+  prisma.db.codes.set("hara-services", {
+    id: "c-services",
+    orgId: "o-services",
+    code: "hara-services",
+    model: "glm-5",
+    baseUrl: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    usedAt: null,
+  });
+  const serviceBindings = {
+    activeForEnrollment: async () => [{
+      tenant_id: "o-services",
+      service: "COLLAB",
+      mode: "HARA_HOSTED",
+      account_region: "GLOBAL",
+      api_origin: "https://collab.example.test",
+      issuer: "https://account.example.test",
+      jwks_uri: "https://account.example.test/.well-known/jwks.json",
+      audience: "hara-collab",
+      status: "ACTIVE",
+      capabilities_version: 1,
+      config_version: 3,
+    }],
+  } as unknown as TenantServiceBindingsService;
+  const result = await svcFor(
+    prisma,
+    new MockGatewayAdapter(),
+    undefined,
+    fakeAudit,
+    serviceBindings,
+  ).enroll("hara-services", {
+    name: "services-mac",
+    os: "darwin",
+    hara_version: "0.140.0",
+  });
+
+  assert.deepEqual(result.service_bindings, [{
+    tenant_id: "o-services",
+    service: "COLLAB",
+    mode: "HARA_HOSTED",
+    account_region: "GLOBAL",
+    api_origin: "https://collab.example.test",
+    issuer: "https://account.example.test",
+    jwks_uri: "https://account.example.test/.well-known/jwks.json",
+    audience: "hara-collab",
+    status: "ACTIVE",
+    capabilities_version: 1,
+    config_version: 3,
+  }]);
+  assert.equal(JSON.stringify(result).includes("credential"), false);
 });
 
 test("enroll: a Desk provisioning failure rolls back model access, restores the code, and audits the rollback", async () => {

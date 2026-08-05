@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { safeFetch } from "../security/ssrf";
+import { TenantServiceBindingsService } from "../service-bindings/service-bindings.service";
 
 interface DeskProvisioningTarget {
   url: string;
@@ -112,6 +113,11 @@ export class DeskProvisioner {
     process.env.HARA_DESK_PROVISIONING_JSON,
   );
 
+  constructor(
+    @Optional()
+    private readonly serviceBindings?: TenantServiceBindingsService,
+  ) {}
+
   configured(orgId: string): boolean {
     return this.targets.has(orgId);
   }
@@ -123,30 +129,43 @@ export class DeskProvisioner {
     owner: string;
     deviceName: string;
   }): Promise<ProvisionedDeskBinding | undefined> {
-    const target = this.targets.get(input.orgId);
+    const managedTarget = await this.serviceBindings?.deskProvisioningTarget(
+      input.orgId,
+    );
+    const legacyTarget = this.targets.get(input.orgId);
+    const target = managedTarget ?? legacyTarget;
     if (!target) return undefined;
     const owner = boundedIdentity(input.owner, "Desk owner");
     const deviceName = boundedIdentity(input.deviceName, "Desk device name");
-    const response = await safeFetch(
-      `${target.url}/register`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          enrollKey: target.enrollKey,
-          owner,
-          name: deviceName,
-          client: "hara-control-enrollment",
-        }),
-        signal: AbortSignal.timeout(10_000),
-      },
-      {
-        // Desk registration must never follow a redirect carrying its enrollment secret.
-        allowHosts: new Set([new URL(target.url).hostname.toLowerCase()]),
-        blockPrivateWhenOpen: false,
-        maxRedirects: 0,
-      },
-    );
+    const managedSecret = managedTarget?.enrollKey;
+    let response: Response;
+    try {
+      response = await safeFetch(
+        `${target.url}/register`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            enrollKey: managedSecret
+              ? managedSecret.toString("utf8")
+              : legacyTarget!.enrollKey,
+            owner,
+            name: deviceName,
+            client: "hara-control-enrollment",
+          }),
+          signal: AbortSignal.timeout(10_000),
+        },
+        {
+          // Desk registration must never follow a redirect carrying its enrollment secret.
+          allowHosts: new Set([new URL(target.url).hostname.toLowerCase()]),
+          blockPrivateWhenOpen: false,
+          maxRedirects: 0,
+        },
+      );
+    } finally {
+      // Database-managed credentials are decrypted into an owned Buffer for this one request only.
+      managedSecret?.fill(0);
+    }
     if (!response.ok) {
       throw new Error(`Hara Desk provisioning failed with HTTP ${response.status}`);
     }

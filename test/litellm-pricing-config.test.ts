@@ -43,3 +43,22 @@ test("the mock model has synthetic positive pricing so the live E2E exercises sp
   assert.ok(price(mock, "input_cost_per_token") > 0);
   assert.ok(price(mock, "output_cost_per_token") > 0);
 });
+
+test("every managed DeepSeek route uses its native adapter and transparently relays thinking controls", () => {
+  for (const model of [
+    "glm-mock",
+    "glm-mock-pro",
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-chat",
+    "deepseek-pro",
+  ]) {
+    const block = modelBlock(model);
+    assert.match(block, /^\s+model:\s+deepseek\//m, `${model} must use LiteLLM's DeepSeek adapter`);
+    assert.match(
+      block,
+      /^\s+allowed_openai_params:\s*\[thinking, reasoning_effort\]\s*$/m,
+      `${model} must preserve native DeepSeek thinking controls`,
+    );
+  }
+});

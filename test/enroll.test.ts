@@ -376,7 +376,7 @@ test("enroll: applies and persists the admin-issued lifetime, rolling budgets, R
   });
   assert.equal(result.expires_at, "2026-07-24T00:00:00.000Z");
   assert.deepEqual(result.available_models, ["deepseek-chat"]);
-  assert.deepEqual(result.thinking_efforts, ["off", "high", "max"]);
+  assert.deepEqual(result.thinking_efforts, ["off", "low", "high", "max"]);
   assert.equal(result.access_policy.tokenTtlMinutes, 2 * 24 * 60);
   assert.equal(prisma.db.tokens[0].rpmLimit, 30);
   assert.equal(prisma.db.tokens[0].tpmLimit, 120_000);

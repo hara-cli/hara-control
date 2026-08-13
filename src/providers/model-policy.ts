@@ -12,7 +12,7 @@ const DEEPSEEK_V4_DETAILS: Readonly<Record<string, {
   tier: "flash" | "pro";
   contextWindowTokens: number;
   maxOutputTokens: number;
-  thinkingEfforts: readonly ["off", "high", "max"];
+  thinkingEfforts: readonly ["off", "low", "high", "max"];
 }>> = {
   "deepseek-v4-flash": {
     provider: "deepseek",
@@ -20,7 +20,7 @@ const DEEPSEEK_V4_DETAILS: Readonly<Record<string, {
     tier: "flash",
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
-    thinkingEfforts: ["off", "high", "max"],
+    thinkingEfforts: ["off", "low", "high", "max"],
   },
   "deepseek-v4-pro": {
     provider: "deepseek",
@@ -28,7 +28,7 @@ const DEEPSEEK_V4_DETAILS: Readonly<Record<string, {
     tier: "pro",
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
-    thinkingEfforts: ["off", "high", "max"],
+    thinkingEfforts: ["off", "low", "high", "max"],
   },
 };
 

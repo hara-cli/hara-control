@@ -6,19 +6,23 @@ model_list:
   # ── Phase-0 spike target: local OpenAI-compatible mock, no real key ──
   - model_name: glm-mock
     litellm_params:
-      model: openai/glm-mock
+      model: deepseek/glm-mock
       # host/uvx: http://localhost:8899/v1 ; in Docker: http://host.docker.internal:8899/v1
       api_base: os.environ/HARA_MOCK_BASE
       api_key: mock-not-a-real-key
+      # The OpenAI-compatible wire accepts DeepSeek's native thinking controls. LiteLLM's
+      # generic OpenAI transform does not advertise them, so opt them into transparent relay.
+      allowed_openai_params: [thinking, reasoning_effort]
     # Synthetic non-zero prices make the local budget/spend E2E exercise real metering behavior.
     model_info:
       input_cost_per_token: 0.000001
       output_cost_per_token: 0.000001
   - model_name: glm-mock-pro
     litellm_params:
-      model: openai/glm-mock-pro
+      model: deepseek/glm-mock-pro
       api_base: os.environ/HARA_MOCK_BASE
       api_key: mock-not-a-real-key
+      allowed_openai_params: [thinking, reasoning_effort]
     model_info:
       input_cost_per_token: 0.000001
       output_cost_per_token: 0.000001
@@ -29,9 +33,10 @@ model_list:
   # issued device keys and profiles keep working; new enrollment canonicalizes them before issue.
   - model_name: deepseek-v4-flash
     litellm_params:
-      model: openai/deepseek-v4-flash
+      model: deepseek/deepseek-v4-flash
       api_base: https://api.deepseek.com
       api_key: os.environ/UPSTREAM_API_KEY
+      allowed_openai_params: [thinking, reasoning_effort]
     # DeepSeek V4 official USD/token pricing, checked 2026-07-22.
     model_info:
       input_cost_per_token: 0.00000014
@@ -39,9 +44,10 @@ model_list:
       cache_read_input_token_cost: 0.0000000028
   - model_name: deepseek-v4-pro
     litellm_params:
-      model: openai/deepseek-v4-pro
+      model: deepseek/deepseek-v4-pro
       api_base: https://api.deepseek.com
       api_key: os.environ/UPSTREAM_API_KEY
+      allowed_openai_params: [thinking, reasoning_effort]
     model_info:
       input_cost_per_token: 0.000000435
       output_cost_per_token: 0.00000087
@@ -50,18 +56,20 @@ model_list:
   # Compatibility aliases — never advertise these for newly issued keys.
   - model_name: deepseek-chat
     litellm_params:
-      model: openai/deepseek-v4-flash
+      model: deepseek/deepseek-v4-flash
       api_base: https://api.deepseek.com
       api_key: os.environ/UPSTREAM_API_KEY
+      allowed_openai_params: [thinking, reasoning_effort]
     model_info:
       input_cost_per_token: 0.00000014
       output_cost_per_token: 0.00000028
       cache_read_input_token_cost: 0.0000000028
   - model_name: deepseek-pro
     litellm_params:
-      model: openai/deepseek-v4-pro
+      model: deepseek/deepseek-v4-pro
       api_base: https://api.deepseek.com
       api_key: os.environ/UPSTREAM_API_KEY
+      allowed_openai_params: [thinking, reasoning_effort]
     model_info:
       input_cost_per_token: 0.000000435
       output_cost_per_token: 0.00000087

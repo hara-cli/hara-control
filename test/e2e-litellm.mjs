@@ -15,11 +15,11 @@ const MANAGED_MODELS = ["glm-mock", "glm-mock-pro"];
 
 const adminReq = (p, b, m = "POST") =>
   fetch(`${CTRL}${p}`, { method: m, headers: { "content-type": "application/json", "x-admin-key": ADMIN }, body: b ? JSON.stringify(b) : undefined });
-const chat = (key, model = MANAGED_MODELS[0]) =>
+const chat = (key, model = MANAGED_MODELS[0], extra = {}) =>
   fetch(`${LITELLM}/v1/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }] }),
+    body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }], ...extra }),
   });
 const ok = (c, m) => { if (!c) throw new Error(`assertion failed: ${m}`); };
 const POLICY = {
@@ -102,6 +102,52 @@ export async function run() {
     ok(/mock upstream/i.test(content), `gateway proxied ${model} to upstream (got: ${JSON.stringify(content)})`);
   }
   console.log("  · the same device key works on both managed models");
+
+  // Hara's managed DeepSeek route intentionally stays on Chat until the proxy has a fully verified
+  // Responses contract. Prove the current pinned LiteLLM does not silently erase DeepSeek's native
+  // thinking controls: users must get the same off/low/high/max semantics through a company key.
+  r = await chat(enr.device_token, MANAGED_MODELS[0], {
+    thinking: { type: "enabled" },
+    reasoning_effort: "low",
+  });
+  ok(r.ok, `managed low-thinking request -> ${r.status}`);
+  let upstreamRequest = await fetch("http://127.0.0.1:8899/_last-request").then((response) => response.json());
+  ok(upstreamRequest?.thinking?.type === "enabled", "LiteLLM preserved thinking.enabled");
+  ok(upstreamRequest?.reasoning_effort === "low", "LiteLLM preserved reasoning_effort=low");
+  r = await chat(enr.device_token, MANAGED_MODELS[1], {
+    thinking: { type: "enabled" },
+    reasoning_effort: "max",
+  });
+  ok(r.ok, `managed max-thinking request -> ${r.status}`);
+  upstreamRequest = await fetch("http://127.0.0.1:8899/_last-request").then((response) => response.json());
+  ok(upstreamRequest?.thinking?.type === "enabled", "LiteLLM preserved thinking.enabled for max");
+  ok(upstreamRequest?.reasoning_effort === "max", "LiteLLM preserved reasoning_effort=max");
+  r = await chat(enr.device_token, MANAGED_MODELS[1], {
+    thinking: { type: "disabled" },
+  });
+  ok(r.ok, `managed thinking-off request -> ${r.status}`);
+  upstreamRequest = await fetch("http://127.0.0.1:8899/_last-request").then((response) => response.json());
+  ok(upstreamRequest?.thinking?.type === "disabled", "LiteLLM preserved thinking.disabled");
+
+  r = await chat(enr.device_token, MANAGED_MODELS[0], {
+    stream: true,
+    thinking: { type: "enabled" },
+    reasoning_effort: "high",
+    messages: [{ role: "user", content: "check the weather" }],
+    tools: [{
+      type: "function",
+      function: {
+        name: "get_weather",
+        description: "Get weather",
+        parameters: { type: "object", properties: { location: { type: "string" } }, required: ["location"] },
+      },
+    }],
+  });
+  ok(r.ok, `managed reasoning tool-call stream -> ${r.status}`);
+  const reasoningStream = await r.text();
+  ok(/reasoning_content|"reasoning"/.test(reasoningStream), "LiteLLM preserved reasoning continuation in its stream");
+  ok(/tool_calls/.test(reasoningStream), "LiteLLM preserved the tool call beside reasoning");
+  console.log("  · managed DeepSeek preserves native off/low/high/max controls through LiteLLM");
 
   // Reproduce a pre-0.1.15 single-model key, then prove heartbeat expands it in place. The client keeps
   // exactly the same raw token throughout; Control looks up only LiteLLM's private one-way identifier.

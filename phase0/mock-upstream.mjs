@@ -10,6 +10,7 @@
 import http from "node:http";
 
 const PORT = Number(process.env.MOCK_UPSTREAM_PORT) || 8899;
+let lastRequestBody = null;
 
 const readBody = (req) =>
   new Promise((resolve) => {
@@ -36,11 +37,17 @@ const wantsTool = (body) => {
 const sse = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
 const server = http.createServer(async (req, res) => {
+  if (req.url === "/_last-request" && req.method === "GET") {
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify(lastRequestBody ?? {}));
+    return;
+  }
   if (!req.url.endsWith("/chat/completions") || req.method !== "POST") {
     res.writeHead(404).end("not found");
     return;
   }
   const body = await readBody(req);
+  lastRequestBody = body;
   const streaming = body.stream === true;
   const model = body.model || "glm-mock";
   const id = "chatcmpl-mock-1";
@@ -49,7 +56,12 @@ const server = http.createServer(async (req, res) => {
   if (!streaming) {
     // non-streaming path (kept simple)
     const message = wantsTool(body)
-      ? { role: "assistant", content: null, tool_calls: [{ id: "call_mock_1", type: "function", function: { name: "get_weather", arguments: '{"location":"San Francisco"}' } }] }
+      ? {
+          role: "assistant",
+          content: null,
+          ...(body.thinking?.type === "enabled" ? { reasoning_content: "I should inspect the weather tool." } : {}),
+          tool_calls: [{ id: "call_mock_1", type: "function", function: { name: "get_weather", arguments: '{"location":"San Francisco"}' } }],
+        }
       : { role: "assistant", content: "Hello from the mock upstream." };
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({
@@ -73,7 +85,19 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 
   if (wantsTool(body)) {
-    sse(res, { ...base, choices: [{ index: 0, delta: { role: "assistant", content: null, tool_calls: [{ index: 0, id: "call_mock_1", type: "function", function: { name: "get_weather", arguments: "" } }] }, finish_reason: null }] });
+    sse(res, {
+      ...base,
+      choices: [{
+        index: 0,
+        delta: {
+          role: "assistant",
+          content: null,
+          ...(body.thinking?.type === "enabled" ? { reasoning_content: "I should inspect the weather tool." } : {}),
+          tool_calls: [{ index: 0, id: "call_mock_1", type: "function", function: { name: "get_weather", arguments: "" } }],
+        },
+        finish_reason: null,
+      }],
+    });
     for (const piece of ['{"location":', '"San Francisco"}']) {
       sse(res, { ...base, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: piece } }] }, finish_reason: null }] });
     }

@@ -2,6 +2,28 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.18 - 2026-08-14
+
+### Added
+
+- Add reviewed, organization-scoped service bindings so administrators can manage tenant integrations and
+  optionally provision an explicitly bound Hara Desk identity during enrollment without exposing the shared
+  service credential to a device.
+- Advertise the complete `off` / `low` / `high` / `max` thinking catalog for both DeepSeek V4 Flash and Pro
+  in enrollment responses and the localized administrator console.
+
+### Fixed
+
+- Route every canonical and compatibility DeepSeek model through LiteLLM's native DeepSeek adapter and
+  explicitly relay `thinking` plus `reasoning_effort`. The generic OpenAI adapter previously discarded these
+  controls before the company request reached DeepSeek. Live gateway tests now prove all four states and
+  reasoning-plus-tool-call streaming end to end.
+
+### Security
+
+- Keep service credentials server-side, scope bindings to their organization, validate upstream origins and
+  capabilities, and preserve rollback/audit behavior when optional provisioning fails.
+
 ## 0.1.17 - 2026-08-05
 
 ### Added

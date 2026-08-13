@@ -21,11 +21,11 @@ test("formal enrollment defaults to canonical DeepSeek V4 models with discoverab
     enrollmentManagedModels("deepseek-v4-flash", env),
     ["deepseek-v4-flash", "deepseek-v4-pro"],
   );
-  assert.deepEqual(managedModelThinkingEfforts("deepseek-v4-flash"), ["off", "high", "max"]);
-  assert.deepEqual(managedModelThinkingEfforts("deepseek-pro"), ["off", "high", "max"]);
+  assert.deepEqual(managedModelThinkingEfforts("deepseek-v4-flash"), ["off", "low", "high", "max"]);
+  assert.deepEqual(managedModelThinkingEfforts("deepseek-pro"), ["off", "low", "high", "max"]);
   assert.deepEqual(
     managedModelsThinkingEfforts(["deepseek-v4-flash", "deepseek-v4-pro"]),
-    ["off", "high", "max"],
+    ["off", "low", "high", "max"],
   );
   assert.deepEqual(managedModelOptions(env), [
     {
@@ -35,7 +35,7 @@ test("formal enrollment defaults to canonical DeepSeek V4 models with discoverab
       tier: "flash",
       contextWindowTokens: 1_000_000,
       maxOutputTokens: 384_000,
-      thinkingEfforts: ["off", "high", "max"],
+      thinkingEfforts: ["off", "low", "high", "max"],
       isDefault: true,
     },
     {
@@ -45,7 +45,7 @@ test("formal enrollment defaults to canonical DeepSeek V4 models with discoverab
       tier: "pro",
       contextWindowTokens: 1_000_000,
       maxOutputTokens: 384_000,
-      thinkingEfforts: ["off", "high", "max"],
+      thinkingEfforts: ["off", "low", "high", "max"],
       isDefault: false,
     },
   ]);

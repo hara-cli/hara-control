@@ -2,6 +2,17 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.20 - 2026-08-22
+
+### Fixed
+
+- Route `deepseek-v4-flash-vision-exp` through LiteLLM's generic OpenAI-compatible adapter. LiteLLM 1.92.0's
+  native DeepSeek transform still flattens content arrays and silently removes `image_url` blocks; Flash,
+  Pro, and their compatibility aliases remain on the native adapter so existing thinking behavior is unchanged.
+- Replace the brittle 16-token RGB sampler release gate with a 512×512 three-object recognition probe. The
+  gate now proves the image survived gateway conversion, verifies the semantic answer, records positive USD
+  spend, and deletes the temporary virtual key before Control is promoted.
+
 ## 0.1.19 - 2026-08-21
 
 ### Added

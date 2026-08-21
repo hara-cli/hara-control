@@ -55,7 +55,11 @@ model_list:
       cache_read_input_token_cost: 0.000000044
   - model_name: deepseek-v4-flash-vision-exp
     litellm_params:
-      model: deepseek/deepseek-v4-flash-vision-exp
+      # LiteLLM 1.92.0's native DeepSeek chat transform still assumes DeepSeek accepts text-only
+      # messages and flattens every content array to a string. That silently discards image_url
+      # blocks. The official endpoint is OpenAI-compatible, so use the generic adapter for this
+      # one visual route to preserve its multimodal message verbatim.
+      model: openai/deepseek-v4-flash-vision-exp
       api_base: https://api.deepseek.com
       api_key: os.environ/UPSTREAM_API_KEY
       allowed_openai_params: [thinking, reasoning_effort]

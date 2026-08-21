@@ -13,7 +13,9 @@ export const PRICED_PROBE_MODELS = Object.freeze([
 ]);
 
 export const VISION_PROBE_MODEL = "deepseek-v4-flash-vision-exp";
-const RED_PIXEL_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVRIx+3NMQEAAAjDMMC/ZzDBvlRA01vZJvwHAAAAAAAAAAAAbx2jxAE/ehR5RwAAAABJRU5ErkJggg==";
+// 512×512 white canvas with three separate black squares. A semantic count is a stronger and more
+// stable transport gate than asking a generative vision model to act as an exact RGB pixel sampler.
+const THREE_SQUARES_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAgAAAAIAAQAAAADcA+lXAAAAmElEQVR42u3MIRIAIAwEsfs5Ty8WxQytJCtXJDUsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABwBXK06uUBAAAAAAAAAAAAAAAAAAAAAAAAAAA0gX4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgV2ADsThexDv0+FgAAAAASUVORK5CYII=";
 
 export const PRICED_PROBE_POLICY = {
   budgetLimits: [
@@ -78,16 +80,16 @@ export function pricedProbeCompletionBody(model) {
         content: [
           {
             type: "text",
-            text: "Inspect the attached image. Reply with only the six lowercase hexadecimal digits of its dominant RGB color, without #.",
+            text: "Look at the attached image. How many separate black squares are shown? Reply with exactly one digit.",
           },
           {
             type: "image_url",
-            image_url: { url: RED_PIXEL_DATA_URL, detail: "low" },
+            image_url: { url: THREE_SQUARES_DATA_URL, detail: "original" },
           },
         ],
       }],
       thinking: { type: "disabled" },
-      max_tokens: 16,
+      max_tokens: 128,
       temperature: 0,
     };
   }
@@ -103,8 +105,7 @@ export function visionProbeResponseMatches(model, response) {
   if (model !== VISION_PROBE_MODEL) return true;
   const content = response?.choices?.[0]?.message?.content;
   if (typeof content !== "string") return false;
-  const color = content.toLowerCase().match(/#?([0-9a-f]{6})/u)?.[1];
-  return color === "ff0000";
+  return /(?:^|\D)3(?:\D|$)/u.test(content.trim());
 }
 
 async function jsonPost(fetchImpl, base, path, body, bearer) {
@@ -188,7 +189,7 @@ export async function probeLiteLLMPricedRequest(env = process.env, dependencies 
     }
     const completionBody = await completion.json();
     if (!visionProbeResponseMatches(model, completionBody)) {
-      throw new Error("LiteLLM vision probe did not identify the attached red image as ff0000");
+      throw new Error("LiteLLM vision probe did not count the three attached squares");
     }
 
     for (let attempt = 0; attempt < 30; attempt += 1) {

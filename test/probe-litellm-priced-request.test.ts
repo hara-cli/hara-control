@@ -26,17 +26,22 @@ test("priced-request probe accepts only the three managed canonical V4 routes", 
   );
 });
 
-test("vision priced-request probe sends a real image and requires the observed dominant color", () => {
+test("vision priced-request probe sends a 512px semantic image and requires the observed object count", () => {
   const body = pricedProbeCompletionBody(VISION_PROBE_MODEL);
   assert.equal(body.model, VISION_PROBE_MODEL);
   assert.deepEqual(body.thinking, { type: "disabled" });
+  assert.match(body.messages[0].content[0].text, /separate black squares/);
   assert.match(body.messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
-  assert.equal(body.messages[0].content[1].image_url.detail, "low");
+  const png = Buffer.from(body.messages[0].content[1].image_url.url.split(",")[1], "base64");
+  assert.equal(png.readUInt32BE(16), 512);
+  assert.equal(png.readUInt32BE(20), 512);
+  assert.equal(body.messages[0].content[1].image_url.detail, "original");
+  assert.equal(body.max_tokens, 128);
   assert.equal(visionProbeResponseMatches(VISION_PROBE_MODEL, {
-    choices: [{ message: { content: "`#FF0000`" } }],
+    choices: [{ message: { content: "3" } }],
   }), true);
   assert.equal(visionProbeResponseMatches(VISION_PROBE_MODEL, {
-    choices: [{ message: { content: "0000ff" } }],
+    choices: [{ message: { content: "1" } }],
   }), false);
   assert.equal(visionProbeResponseMatches("deepseek-v4-flash", { choices: [] }), true);
 });

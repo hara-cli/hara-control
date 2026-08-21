@@ -18,6 +18,8 @@
 - **Token lifecycle** — issue / multi-model scope / expiry / rolling budget / rate limit / revoke per device, per user.
 - **Fleet view** — which machines are online, who, version, today's tokens + cost, which models.
 - **Governance** — model allow-lists, per-seat budgets, data-residency policy, org RBAC, audit log.
+- **Reviewed business learning** — collect redacted recurring execution receipts, let an administrator
+  approve/reject/revoke them, and distribute only the versioned approved bundle to enrolled devices.
 - **Multi-tenant** (later) — many orgs on one managed deployment.
 
 It does **not** reimplement the LLM gateway. The **data plane** (protocol translation, routing to N
@@ -86,6 +88,10 @@ Config knobs for the above are in [`.env.example`](./.env.example).
   Desk, Collab, model-control, and extension-catalog bindings per organization. Routes are not active
   until server-side verification passes; provisioning credentials live only in the KMS envelope store.
   Enrollment returns redacted service descriptors and keeps model and Desk device credentials separate.
+- **Evidence before organization behavior**: devices may submit bounded candidate receipts, but runtime
+  observations cannot approve themselves. The console shows recurrence and redacted evidence; an optimistic
+  administrator decision changes a monotonic organization version, and the next full sync removes revoked
+  rules. Approved learning supplies prompt context only and never widens device, model, or tool authority.
 - **Shared Postgres, isolated schemas**: hara-control uses `schema=public`; LiteLLM uses
   `schema=litellm`. This keeps migrations/table names from colliding while still permitting an
   explicitly-reviewed usage aggregation path without cross-database ETL.
@@ -199,6 +205,8 @@ Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database
 - **Phase 1 — MVP: ✅ implemented.** NestJS + Prisma + Postgres. Endpoints: `POST /v1/enroll`,
   `POST /v1/heartbeat` (device-facing, matches the CLI contract); `POST /admin/orgs`,
   `GET /admin/model-options`, `POST /admin/enroll-codes`, `GET /admin/fleet`, `GET /admin/usage`,
+  `POST /v1/learnings/candidates`, `GET /v1/learnings`, `GET /admin/learnings`,
+  `POST /admin/learnings/:id/review`,
   `POST /admin/devices/:id/revoke`, plus organization-scoped service-binding list/configure/verify/
   disable endpoints (admin-gated).
   Device tokens are gateway virtual keys behind the `GatewayAdapter` seam (LiteLLM in prod, an

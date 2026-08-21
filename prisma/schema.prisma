@@ -74,6 +74,22 @@ enum TenantServiceStatus {
   DISABLED
 }
 
+enum LearningKind {
+  BUSINESS_RULE
+  USER_PREFERENCE
+  WORKFLOW
+  CORRECTION
+  FAILURE_PATTERN
+  ACTION_OWNERSHIP
+}
+
+enum LearningStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
+}
+
 /// An org unit — a node in a typed, self-referential tree (集团 → 公司 → 部门 → 组). Pre-existing rows
 /// default to COMPANY roots (parentId null), so single-company mode keeps working unchanged. Governance
 /// (`policy`) inherits DOWN the tree: a department inherits its company's setting unless it overrides
@@ -84,6 +100,7 @@ model Organization {
   type      OrgUnitType @default(COMPANY) // 集团/公司/部门/组 — advisory nesting, not hard-enforced
   parentId  String? // null = a root unit (a standalone COMPANY, or a GROUP top); set = a child unit
   policy    Json        @default("{}") // governance: modelDeny / requireApprovalForWrites / toolDeny / budget
+  learningVersion Int   @default(0) // monotonic watermark for approved/revoked organization learning bundles
   createdAt DateTime    @default(now())
 
   // self-referential tree (downward inheritance walks parent → … → root)
@@ -101,6 +118,8 @@ model Organization {
   workSessions     WorkSession[]
   workEvents       WorkEvent[]
   serviceBindings  TenantServiceBinding[]
+  learningCandidates LearningCandidate[]
+  learningObservations LearningObservation[]
 
   @@index([parentId])
 }
@@ -178,9 +197,66 @@ model Device {
 
   tokens       DeviceToken[]
   workSessions WorkSession[]
+  learningObservations LearningObservation[]
 
   @@index([orgId])
   @@index([personId])
+}
+
+/// One organization-wide, reviewable learning pattern. Runtime submissions may add redacted observations,
+/// but only an administrator review changes the active APPROVED bundle or its monotonic watermark.
+model LearningCandidate {
+  id                String         @id @default(uuid()) @db.Uuid
+  org               Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId             String
+  patternKey        String         @db.VarChar(120)
+  kind              LearningKind
+  summary           String         @db.VarChar(1200)
+  rationale         String?        @db.VarChar(1000)
+  pendingSummary    String?        @db.VarChar(1200)
+  pendingRationale  String?        @db.VarChar(1000)
+  pendingAt         DateTime?      @db.Timestamptz(6)
+  status            LearningStatus @default(PENDING)
+  occurrenceCount   Int            @default(0)
+  distinctTaskCount Int            @default(0)
+  revision          Int            @default(1)
+  sourceVersion     String         @default("") @db.VarChar(64)
+  reviewedAt        DateTime?      @db.Timestamptz(6)
+  reviewedBy        String?        @db.VarChar(160)
+  reviewNote        String?        @db.VarChar(500)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(6)
+
+  observations LearningObservation[]
+
+  @@unique([orgId, patternKey, kind])
+  @@index([orgId, status, updatedAt])
+  @@map("learning_candidates")
+}
+
+/// Bounded redacted evidence receipt. taskHash/fingerprint are opaque client hashes; raw prompts,
+/// transcripts, credentials, file paths, and user identities are never accepted into this table.
+model LearningObservation {
+  id              String            @id @default(uuid()) @db.Uuid
+  candidate       LearningCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  candidateId     String            @db.Uuid
+  org             Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId           String
+  device          Device            @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId        String
+  clientId        String            @db.VarChar(80)
+  taskHash        String            @db.Char(32)
+  fingerprint     String            @db.Char(32)
+  summary         String            @db.VarChar(1000)
+  source          String            @db.VarChar(40)
+  sourceVersion   String            @db.VarChar(64)
+  observedAt      DateTime          @db.Timestamptz(6)
+  createdAt       DateTime          @default(now()) @db.Timestamptz(6)
+
+  @@unique([deviceId, clientId, fingerprint])
+  @@index([candidateId, observedAt])
+  @@index([orgId, taskHash])
+  @@map("learning_observations")
 }
 
 /// A scoped, revocable device token. The token value itself is a gateway (LiteLLM) virtual

@@ -2,6 +2,26 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.22 - 2026-08-22
+
+### Added
+
+- Add a device-authenticated organization learning intake and a versioned approved bundle. Hara clients submit
+  only bounded redacted evidence; Control deduplicates observations, scores 30-day recurrence across distinct
+  tasks, and keeps new or changed proposals outside the active bundle until an administrator reviews them.
+- Add a localized Business Learning console for organization selection, review/active/history views, recurrence
+  counts, redacted evidence receipts, optimistic approve/reject/revoke actions, and visible distribution state.
+  Approval increments the organization watermark; revocation removes the rule from every client's next sync.
+
+### Security
+
+- Authenticate the device before checking entitlements, enforce tenant scope on both list and review routes,
+  reject credentials, authorization headers, private keys, local user paths, email addresses, prompt-injection
+  phrases, file URLs, control characters, and future-dated evidence, and keep proposal text out of audit payloads.
+- Bound candidate/evidence capacity, response sizes, database transactions, evidence previews, and review
+  revisions. Runtime observations can never self-approve, and only the administrator-approved full bundle is
+  returned to enrolled devices.
+
 ## 0.1.21 - 2026-08-22
 
 ### Fixed

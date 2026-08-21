@@ -3,7 +3,7 @@
  *
  * Single-page console. No framework, no build. Responsibilities:
  *   1. i18n engine  — three dicts loaded as window.HARA_I18N.{en,zh-CN,zh-TW}.
- *   2. Hash router  — seven views (overview/orgs/fleet/usage/enroll/users/security).
+ *   2. Hash router  — eight views (overview/orgs/fleet/usage/learnings/enroll/users/security).
  *   3. Auth flow    — email+password → optional TOTP code → JWT (8h).
  *   4. API client   — every endpoint from _legacy_index.html, contract-identical.
  *   5. QR codes     — window.HaraQR.toSvg() called for the 2FA enrollment view.
@@ -226,6 +226,16 @@
     const preferred = previous || (me && me.orgId) || (orgChoices.length === 1 ? orgChoices[0].id : "");
     if (preferred && orgChoices.some((org) => org.id === preferred)) select.value = preferred;
 
+    const learningSelect = $("#learning-orgid");
+    const previousLearningOrg = learningSelect.value;
+    learningSelect.innerHTML = `<option value="">${escapeHtml(I18N.t("learnings.org.choose"))}</option>` +
+      orgChoices.map((org) =>
+        `<option value="${escapeHtml(org.id)}">${escapeHtml(org.name)} · ${escapeHtml(org.type)}</option>`).join("");
+    const preferredLearningOrg = previousLearningOrg || (me && me.orgId) || (orgChoices.length === 1 ? orgChoices[0].id : "");
+    if (preferredLearningOrg && orgChoices.some((org) => org.id === preferredLearningOrg)) {
+      learningSelect.value = preferredLearningOrg;
+    }
+
     const serviceSelect = $("#service-orgid");
     const previousServiceOrg = serviceSelect.value;
     serviceSelect.innerHTML = `<option value="">${escapeHtml(I18N.t("orgs.services.org.choose"))}</option>` +
@@ -355,7 +365,7 @@
   // ║ 7.  hash router                                                   ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   const router = (() => {
-    const ROUTES = ["overview", "orgs", "fleet", "usage", "enroll", "users", "security"];
+    const ROUTES = ["overview", "orgs", "fleet", "usage", "learnings", "enroll", "users", "security"];
     const handlers = {};   // optional onEnter hooks per view
 
     let last = null;
@@ -408,6 +418,7 @@
     const r = router.current;
     if (r === "fleet" && lastFleetRows) renderFleet();
     if (r === "usage" && lastUsageReport) renderUsage(lastUsageReport);
+    if (r === "learnings" && lastLearningRows) renderLearnings(lastLearningRows);
     if (r === "users") loadUsers();
     if (r === "orgs") {
       if (lastInspectId) inspectOrg(lastInspectId);
@@ -815,7 +826,198 @@
   }
 
   // ╔═══════════════════════════════════════════════════════════════════╗
-  // ║ 11.  Usage + quota flight recorder                                ║
+  // ║ 11.  Organization learning review                                 ║
+  // ╚═══════════════════════════════════════════════════════════════════╝
+  let learningFilter = "review";
+  let lastLearningRows = null;
+  let learningRequestId = 0;
+
+  const needsLearningReview = (row) => row.status === "pending" || Boolean(row.pending_summary);
+
+  router.on("learnings", async () => {
+    try {
+      const orgs = await getOrgChoices();
+      const select = $("#learning-orgid");
+      if (!select.value && orgs.length) select.value = (me && me.orgId) || orgs[0].id;
+      if (select.value) loadLearnings();
+      else renderLearningPrompt();
+    } catch (error) {
+      toast(error.message, "err");
+      renderLearningPrompt();
+    }
+  });
+
+  $("#learning-refresh").addEventListener("click", loadLearnings);
+  $("#learning-orgid").addEventListener("change", loadLearnings);
+  $$('[data-learning-filter]').forEach((button) => {
+    button.addEventListener("click", () => {
+      learningFilter = button.getAttribute("data-learning-filter");
+      $$('[data-learning-filter]').forEach((candidate) => {
+        const active = candidate === button;
+        candidate.classList.toggle("segmented__item--active", active);
+        candidate.setAttribute("aria-pressed", String(active));
+      });
+      if (lastLearningRows) renderLearnings(lastLearningRows);
+    });
+  });
+
+  function resetLearningCounts() {
+    $("#learning-review-count").textContent = "—";
+    $("#learning-active-count").textContent = "—";
+    $("#learning-stable-count").textContent = "—";
+    $("#learning-total-count").textContent = "—";
+    $("#learning-updated").textContent = "—";
+  }
+
+  function renderLearningPrompt() {
+    lastLearningRows = null;
+    resetLearningCounts();
+    $("#learning-list").innerHTML = `<div class="empty">${escapeHtml(I18N.t("learnings.empty.choose_org"))}</div>`;
+  }
+
+  async function loadLearnings() {
+    const orgId = $("#learning-orgid").value;
+    if (!orgId) { renderLearningPrompt(); return; }
+    const requestId = ++learningRequestId;
+    const refresh = $("#learning-refresh");
+    refresh.disabled = true;
+    $("#learning-list").innerHTML = `<div class="empty">${escapeHtml(I18N.t("learnings.loading"))}</div>`;
+    try {
+      const rows = await api("GET", `/admin/learnings?orgId=${encodeURIComponent(orgId)}`);
+      if (requestId !== learningRequestId) return;
+      lastLearningRows = Array.isArray(rows) ? rows : [];
+      renderLearnings(lastLearningRows);
+    } catch (error) {
+      if (requestId !== learningRequestId) return;
+      lastLearningRows = null;
+      resetLearningCounts();
+      $("#learning-list").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      toast(error.message, "err");
+    } finally {
+      if (requestId === learningRequestId) refresh.disabled = false;
+    }
+  }
+
+  function learningRowsForFilter(rows) {
+    if (learningFilter === "review") return rows.filter(needsLearningReview);
+    if (learningFilter === "active") return rows.filter((row) => row.status === "approved");
+    if (learningFilter === "history") return rows.filter((row) => row.status === "rejected" || row.status === "revoked");
+    return rows;
+  }
+
+  function learningEvidence(row) {
+    const observations = Array.isArray(row.observations) ? row.observations : [];
+    if (!observations.length) return "";
+    return `<details class="learning-evidence">
+      <summary>${escapeHtml(I18N.t("learnings.evidence", { n: observations.length }))}</summary>
+      <ol>${observations.map((item) => `<li>
+        <p>${escapeHtml(item.summary || "—")}</p>
+        <span>${escapeHtml(I18N.t(`learnings.source.${item.source}`))} · ${escapeHtml(formatDateTime(item.observed_at))}</span>
+      </li>`).join("")}</ol>
+    </details>`;
+  }
+
+  function learningActions(row) {
+    const attrs = `data-learning-id="${escapeHtml(row.id)}" data-learning-revision="${escapeHtml(row.revision)}"`;
+    if (needsLearningReview(row)) {
+      return `<div class="learning-card__actions">
+        <button type="button" class="btn" data-learning-decision="approve" ${attrs}>${escapeHtml(I18N.t("learnings.action.approve"))}</button>
+        <button type="button" class="btn-ghost" data-learning-decision="reject" ${attrs}>${escapeHtml(I18N.t("learnings.action.reject"))}</button>
+      </div>`;
+    }
+    if (row.status === "approved") {
+      return `<div class="learning-card__actions">
+        <button type="button" class="btn-danger" data-learning-decision="revoke" ${attrs}>${escapeHtml(I18N.t("learnings.action.revoke"))}</button>
+      </div>`;
+    }
+    return "";
+  }
+
+  function renderLearnings(rows) {
+    const reviewCount = rows.filter(needsLearningReview).length;
+    const activeCount = rows.filter((row) => row.status === "approved").length;
+    const stableCount = rows.filter((row) => row.promotion_ready === true).length;
+    $("#learning-review-count").textContent = String(reviewCount);
+    $("#learning-active-count").textContent = String(activeCount);
+    $("#learning-stable-count").textContent = String(stableCount);
+    $("#learning-total-count").textContent = String(rows.length);
+    $("#learning-updated").textContent = I18N.t("learnings.updated", { time: formatDateTime(new Date()) });
+
+    const filtered = learningRowsForFilter(rows);
+    const host = $("#learning-list");
+    if (!filtered.length) {
+      host.innerHTML = `<div class="empty">${escapeHtml(I18N.t(`learnings.empty.${learningFilter}`))}</div>`;
+      return;
+    }
+
+    host.innerHTML = `<div class="learning-list">${filtered.map((row) => {
+      const hasUpdate = Boolean(row.pending_summary);
+      const proposal = hasUpdate ? row.pending_summary : row.summary;
+      const rationale = hasUpdate ? row.pending_rationale : row.rationale;
+      return `<article class="learning-card${needsLearningReview(row) ? " learning-card--review" : ""}">
+        <div class="learning-card__rail" aria-hidden="true"></div>
+        <div class="learning-card__body">
+          <header class="learning-card__head">
+            <div class="learning-card__identity">
+              <div class="learning-card__eyebrow mono">${escapeHtml(row.pattern_key || "—")}</div>
+              <div class="learning-card__badges">
+                <span class="pill learning-status learning-status--${escapeHtml(row.status)}">${escapeHtml(I18N.t(`learnings.status.${row.status}`))}</span>
+                <span class="pill">${escapeHtml(I18N.t(`learnings.kind.${row.kind}`))}</span>
+                ${row.promotion_ready ? `<span class="pill pill--coral">${escapeHtml(I18N.t("learnings.recurring"))}</span>` : ""}
+                ${hasUpdate ? `<span class="pill pill--accent">${escapeHtml(I18N.t("learnings.pending_update"))}</span>` : ""}
+              </div>
+            </div>
+            <div class="learning-card__metrics mono">
+              <span>${escapeHtml(I18N.t("learnings.metric.observations", { n: row.occurrence_count || 0 }))}</span>
+              <span>${escapeHtml(I18N.t("learnings.metric.tasks", { n: row.distinct_task_count || 0 }))}</span>
+            </div>
+          </header>
+          ${hasUpdate ? `<div class="learning-active-copy">
+            <span>${escapeHtml(I18N.t("learnings.current"))}</span>
+            <p>${escapeHtml(row.summary || "—")}</p>
+          </div>` : ""}
+          <div class="learning-proposal">
+            <span>${escapeHtml(hasUpdate ? I18N.t("learnings.proposed_update") : I18N.t("learnings.proposal"))}</span>
+            <p>${escapeHtml(proposal || "—")}</p>
+            ${rationale ? `<small>${escapeHtml(rationale)}</small>` : ""}
+          </div>
+          <div class="learning-card__foot">
+            <span>${escapeHtml(I18N.t("learnings.updated_at", { time: formatDateTime(row.updated_at) }))}</span>
+            ${row.reviewed_by ? `<span>${escapeHtml(I18N.t("learnings.reviewed_by", { person: row.reviewed_by }))}</span>` : ""}
+          </div>
+          ${learningEvidence(row)}
+          ${learningActions(row)}
+        </div>
+      </article>`;
+    }).join("")}</div>`;
+  }
+
+  $("#learning-list").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-learning-decision]");
+    if (!button) return;
+    const decision = button.getAttribute("data-learning-decision");
+    const id = button.getAttribute("data-learning-id");
+    const expectedRevision = Number(button.getAttribute("data-learning-revision"));
+    if (!decision || !id || !Number.isInteger(expectedRevision)) return;
+    if (decision !== "approve" && !confirm(I18N.t(`learnings.confirm.${decision}`))) return;
+    $("#learning-list").querySelectorAll("button[data-learning-decision]").forEach((candidate) => {
+      candidate.disabled = true;
+    });
+    try {
+      await api("POST", `/admin/learnings/${encodeURIComponent(id)}/review`, {
+        decision,
+        expected_revision: expectedRevision,
+      });
+      toast(I18N.t(`learnings.toast.${decision}`), "ok");
+      await loadLearnings();
+    } catch (error) {
+      toast(error.message, "err");
+      await loadLearnings();
+    }
+  });
+
+  // ╔═══════════════════════════════════════════════════════════════════╗
+  // ║ 12.  Usage + quota flight recorder                                ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   let usageRange = "24h";
   let lastUsageReport = null;

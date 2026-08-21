@@ -92,6 +92,12 @@
         </span>
         <span data-i18n="nav.usage">Usage</span>
       </a>
+      <a class="sidebar__item" href="#/learnings" data-route="learnings">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5z"/><path d="M7 7h2M15 7h2M7 11h2M15 11h2"/></svg>
+        </span>
+        <span data-i18n="nav.learnings">Learning</span>
+      </a>
       <a class="sidebar__item" href="#/enroll" data-route="enroll">
         <span class="sidebar__item-icon" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3"/><path d="M9 3h6v8H9z"/></svg>
@@ -429,6 +435,71 @@
         </div>
         <div id="usage-breakdown"></div>
       </section>
+    </section>
+
+    <!-- LEARNINGS -->
+    <section class="view hidden" id="view-learnings" data-view="learnings">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.learnings">Learning</h1>
+          <p class="view__subtitle" data-i18n="learnings.hint">Review recurring, redacted execution evidence before it becomes organization guidance.</p>
+        </div>
+        <div class="learning-updated mono" id="learning-updated">—</div>
+      </div>
+
+      <section class="card learning-toolbar">
+        <div class="learning-toolbar__org">
+          <label class="field__label" for="learning-orgid" data-i18n="learnings.org">Organization</label>
+          <select class="select" id="learning-orgid">
+            <option value="" data-i18n="learnings.org.choose">Choose an organization…</option>
+          </select>
+        </div>
+        <div class="learning-toolbar__filter">
+          <span class="field__label" data-i18n="learnings.filter">View</span>
+          <div class="segmented" role="group" aria-label="Learning review filter">
+            <button type="button" class="segmented__item segmented__item--active" data-learning-filter="review" aria-pressed="true" data-i18n="learnings.filter.review">Needs review</button>
+            <button type="button" class="segmented__item" data-learning-filter="active" aria-pressed="false" data-i18n="learnings.filter.active">Active</button>
+            <button type="button" class="segmented__item" data-learning-filter="history" aria-pressed="false" data-i18n="learnings.filter.history">History</button>
+            <button type="button" class="segmented__item" data-learning-filter="all" aria-pressed="false" data-i18n="learnings.filter.all">All</button>
+          </div>
+        </div>
+        <button type="button" class="btn-ghost learning-toolbar__refresh" id="learning-refresh" data-i18n="learnings.refresh">Refresh</button>
+      </section>
+
+      <div class="learning-guardrail" role="note">
+        <div class="learning-guardrail__mark" aria-hidden="true">✓</div>
+        <div>
+          <strong data-i18n="learnings.guardrail.title">Review before reuse</strong>
+          <p data-i18n="learnings.guardrail.body">Only approved summaries enter organization prompts. Evidence is bounded and redacted; credentials and private local paths are rejected by the server.</p>
+        </div>
+      </div>
+
+      <div class="grid grid--kpi mb-2">
+        <div class="kpi kpi--trace">
+          <div class="kpi__label" data-i18n="learnings.kpi.review">Needs review</div>
+          <div class="kpi__value" id="learning-review-count">—</div>
+          <div class="kpi__hint" data-i18n="learnings.kpi.review.hint">New candidates or approved rules with a proposed update</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="learnings.kpi.active">Active</div>
+          <div class="kpi__value" id="learning-active-count">—</div>
+          <div class="kpi__hint" data-i18n="learnings.kpi.active.hint">Approved and distributed to enrolled devices</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="learnings.kpi.stable">Recurring</div>
+          <div class="kpi__value" id="learning-stable-count">—</div>
+          <div class="kpi__hint" data-i18n="learnings.kpi.stable.hint">Observed 3+ times across 2+ tasks in 30 days</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label" data-i18n="learnings.kpi.total">Total</div>
+          <div class="kpi__value" id="learning-total-count">—</div>
+          <div class="kpi__hint" data-i18n="learnings.kpi.total.hint">Bounded organization learning ledger</div>
+        </div>
+      </div>
+
+      <div id="learning-list" aria-live="polite">
+        <div class="empty" data-i18n="learnings.empty.choose_org">Choose an organization to review its learning ledger.</div>
+      </div>
     </section>
 
     <!-- ENROLL -->

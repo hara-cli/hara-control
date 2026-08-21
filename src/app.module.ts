@@ -15,6 +15,7 @@ import { AuthModule } from "./auth/auth.module";
 import { HealthModule } from "./health/health.module";
 import { ProviderCredentialsModule } from "./providers/provider-credentials.module";
 import { TenantServiceBindingsModule } from "./service-bindings/service-bindings.module";
+import { LearningsModule } from "./learnings/learnings.module";
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { TenantServiceBindingsModule } from "./service-bindings/service-bindings
     HealthModule,
     ProviderCredentialsModule,
     TenantServiceBindingsModule,
+    LearningsModule,
   ],
 })
 export class AppModule {}

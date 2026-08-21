@@ -36,7 +36,7 @@
   },
   "overrides": {
     "deepmerge-ts": "8.0.0",
-    "fast-uri": "3.1.4",
-    "js-yaml": "4.3.0"
+    "fast-uri": "3.1.5",
+    "js-yaml": "4.3.1"
   }
 }

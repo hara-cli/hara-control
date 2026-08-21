@@ -22,7 +22,9 @@ All notable changes to hara-control are documented in this file.
 ### Security
 
 - Override Prisma's vulnerable `deepmerge-ts` transitive pin with 8.0.0, eliminating the recursive-object
-  stack-exhaustion advisory while retaining the existing Prisma 6 database and migration contract.
+  stack-exhaustion advisory while retaining the existing Prisma 6 database and migration contract. Refresh
+  the defensive `fast-uri` and `js-yaml` overrides to 3.1.5 and 4.3.1 so future dependency resolution cannot
+  reintroduce their patched high-severity advisories.
 
 ## 0.1.18 - 2026-08-14
 

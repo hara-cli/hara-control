@@ -67,6 +67,8 @@ PM2_ASSERT_NAMES=("$PM2_NAME")
 if [ "$GATEWAY_MODE" = "litellm" ]; then
   echo "▶ build/verify pinned LiteLLM runtime"
   bash scripts/ensure-litellm-venv.sh
+  echo "▶ verify/apply exact DeepSeek visual transform patch"
+  node scripts/patch-litellm-deepseek-vision.mjs
   echo "▶ verify/synchronize isolated LiteLLM schema"
   node scripts/sync-litellm-schema.mjs
 fi

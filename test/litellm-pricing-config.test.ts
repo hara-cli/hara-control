@@ -53,12 +53,13 @@ test("the mock model has synthetic positive pricing so the live E2E exercises sp
   assert.ok(price(mock, "output_cost_per_token") > 0);
 });
 
-test("text DeepSeek routes use the native adapter and transparently relay thinking controls", () => {
+test("every managed DeepSeek route uses the native adapter and transparently relays thinking controls", () => {
   for (const model of [
     "glm-mock",
     "glm-mock-pro",
     "deepseek-v4-flash",
     "deepseek-v4-pro",
+    "deepseek-v4-flash-vision-exp",
     "deepseek-chat",
     "deepseek-pro",
   ]) {
@@ -72,10 +73,8 @@ test("text DeepSeek routes use the native adapter and transparently relay thinki
   }
 });
 
-test("the visual route uses OpenAI-compatible pass-through so LiteLLM cannot flatten image blocks", () => {
+test("the visual route documents the deployment patch that preserves image blocks", () => {
   const vision = modelBlock("deepseek-v4-flash-vision-exp");
-  assert.match(vision, /^\s+model:\s+openai\/deepseek-v4-flash-vision-exp\s*$/m);
-  assert.doesNotMatch(vision, /^\s+model:\s+deepseek\//m);
-  assert.match(vision, /silently discards image_url/);
-  assert.match(vision, /^\s+allowed_openai_params:\s*\[thinking, reasoning_effort\]\s*$/m);
+  assert.match(vision, /byte-checked/);
+  assert.match(vision, /retains image_url blocks/);
 });

@@ -2,6 +2,17 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.21 - 2026-08-22
+
+### Fixed
+
+- Preserve `image_url` content blocks for `deepseek-v4-flash-vision-exp` while retaining LiteLLM's native
+  DeepSeek thinking and tool semantics. Deployment now applies an idempotent, exact-version and whole-file
+  checksum-verified transform patch; any dependency drift fails closed instead of modifying unknown code.
+- Keep the real three-object image-and-spend deployment probe introduced in 0.1.20. It now exercises the
+  same native DeepSeek adapter used by organization devices and prevents a text-only HTTP 200 from being
+  mistaken for working visual understanding.
+
 ## 0.1.20 - 2026-08-22
 
 ### Fixed

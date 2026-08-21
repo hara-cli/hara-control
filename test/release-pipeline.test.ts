@@ -16,6 +16,10 @@ const liteLlmInstaller = readFileSync(
   resolve("scripts/ensure-litellm-venv.sh"),
   "utf8",
 );
+const deepSeekVisionPatch = readFileSync(
+  resolve("scripts/patch-litellm-deepseek-vision.mjs"),
+  "utf8",
+);
 const rdsDeploy = readFileSync(
   resolve("deploy/nanhara-tech/deploy-ai-rds.sh"),
   "utf8",
@@ -85,9 +89,13 @@ test("LiteLLM runtime pins its database client and never reuses a drifted virtua
 
 test("RDS deploy synchronizes LiteLLM schema before startup and disables runtime mutation", () => {
   const ensureAt = rdsDeploy.indexOf("bash scripts/ensure-litellm-venv.sh");
+  const visionPatchAt = rdsDeploy.indexOf("node scripts/patch-litellm-deepseek-vision.mjs");
   const syncAt = rdsDeploy.indexOf("node scripts/sync-litellm-schema.mjs");
   const startAt = rdsDeploy.indexOf('pm2_clean start "$APP_DIR/scripts/with-production-env.mjs"');
-  assert.ok(ensureAt >= 0 && syncAt > ensureAt && startAt > syncAt);
+  assert.ok(ensureAt >= 0 && visionPatchAt > ensureAt && syncAt > visionPatchAt && startAt > syncAt);
+  assert.match(deepSeekVisionPatch, /PINNED_TRANSFORM_SHA256/);
+  assert.match(deepSeekVisionPatch, /deepseek-v4-flash-vision-exp/);
+  assert.match(deepSeekVisionPatch, /checksum changed; review before patching/);
   assert.match(rdsDeploy, /DISABLE_SCHEMA_UPDATE=true/);
   assert.doesNotMatch(rdsDeploy, /--accept-data-loss/);
 });

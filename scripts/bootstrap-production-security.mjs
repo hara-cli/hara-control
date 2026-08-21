@@ -121,7 +121,7 @@ setValue("HARA_KMS_PROVIDER", "local");
 setValue("HARA_KMS_KEYFILE", keyfile);
 if (decodedCurrentValue("GATEWAY_ADAPTER") === "litellm") {
   setValue("LITELLM_DATABASE_URL", isolatedLiteLLMDatabaseUrl());
-  setValue("HARA_ALLOWED_MODELS", "deepseek-v4-flash,deepseek-v4-pro");
+  setValue("HARA_ALLOWED_MODELS", "deepseek-v4-flash,deepseek-v4-pro,deepseek-v4-flash-vision-exp");
   setValue("HARA_DEFAULT_MODEL", "deepseek-v4-flash");
 }
 

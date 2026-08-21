@@ -3,20 +3,42 @@ import assert from "node:assert/strict";
 import {
   PRICED_PROBE_POLICY,
   PRICED_PROBE_MODELS,
+  VISION_PROBE_MODEL,
   positiveSpendRecorded,
+  pricedProbeCompletionBody,
   pricedProbeModel,
   probeLiteLLMPricedRequest,
   responseConfirmsPricedProbePolicy,
+  visionProbeResponseMatches,
 } from "../scripts/probe-litellm-priced-request.mjs";
 
-test("priced-request probe accepts only the two managed canonical V4 routes", () => {
-  assert.deepEqual(PRICED_PROBE_MODELS, ["deepseek-v4-flash", "deepseek-v4-pro"]);
+test("priced-request probe accepts only the three managed canonical V4 routes", () => {
+  assert.deepEqual(PRICED_PROBE_MODELS, [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash-vision-exp",
+  ]);
   assert.equal(pricedProbeModel({} as NodeJS.ProcessEnv), "deepseek-v4-flash");
   assert.equal(pricedProbeModel({ HARA_PRICED_PROBE_MODEL: "deepseek-v4-pro" } as NodeJS.ProcessEnv), "deepseek-v4-pro");
   assert.throws(
     () => pricedProbeModel({ HARA_PRICED_PROBE_MODEL: "deepseek-chat" } as NodeJS.ProcessEnv),
     /must be one of/,
   );
+});
+
+test("vision priced-request probe sends a real image and requires the observed dominant color", () => {
+  const body = pricedProbeCompletionBody(VISION_PROBE_MODEL);
+  assert.equal(body.model, VISION_PROBE_MODEL);
+  assert.deepEqual(body.thinking, { type: "disabled" });
+  assert.match(body.messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
+  assert.equal(body.messages[0].content[1].image_url.detail, "low");
+  assert.equal(visionProbeResponseMatches(VISION_PROBE_MODEL, {
+    choices: [{ message: { content: "`#FF0000`" } }],
+  }), true);
+  assert.equal(visionProbeResponseMatches(VISION_PROBE_MODEL, {
+    choices: [{ message: { content: "0000ff" } }],
+  }), false);
+  assert.equal(visionProbeResponseMatches("deepseek-v4-flash", { choices: [] }), true);
 });
 
 test("priced-request probe requires both token activity and positive aggregate/log spend", () => {

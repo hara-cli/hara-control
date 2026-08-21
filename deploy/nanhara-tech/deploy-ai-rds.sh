@@ -98,7 +98,7 @@ if [ "$GATEWAY_MODE" = "litellm" ]; then
     sleep 2
   done
   [ "$litellm_ready" = "1" ] || { echo "✗ LiteLLM did not become live"; exit 1; }
-  for probe_model in deepseek-v4-flash deepseek-v4-pro; do
+  for probe_model in deepseek-v4-flash deepseek-v4-pro deepseek-v4-flash-vision-exp; do
     echo "▶ verify $probe_model request records positive USD spend"
     HARA_PRICED_PROBE_MODEL="$probe_model" \
       node scripts/with-production-env.mjs "$APP_DIR/.env" -- \

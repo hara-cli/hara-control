@@ -429,14 +429,14 @@ test("enroll: explicitly non-expiring personal keys remain budgeted, visible, an
   });
 });
 
-test("formal managed enrollment and heartbeat expose both models on the same unchanged device key", async () => {
+test("formal managed enrollment and heartbeat expose all three models on the same unchanged device key", async () => {
   const previous = {
     gateway: process.env.GATEWAY_ADAPTER,
     allowed: process.env.HARA_ALLOWED_MODELS,
     selectedDefault: process.env.HARA_DEFAULT_MODEL,
   };
   process.env.GATEWAY_ADAPTER = "litellm";
-  process.env.HARA_ALLOWED_MODELS = "deepseek-v4-flash,deepseek-v4-pro";
+  process.env.HARA_ALLOWED_MODELS = "deepseek-v4-flash,deepseek-v4-pro,deepseek-v4-flash-vision-exp";
   process.env.HARA_DEFAULT_MODEL = "deepseek-v4-flash";
   try {
     const prisma = fakePrisma();
@@ -473,8 +473,16 @@ test("formal managed enrollment and heartbeat expose both models on the same unc
     );
 
     assert.equal(enrolled.model, "deepseek-v4-flash");
-    assert.deepEqual(enrolled.available_models, ["deepseek-v4-flash", "deepseek-v4-pro"]);
-    assert.deepEqual(issued!.models, ["deepseek-v4-flash", "deepseek-v4-pro"]);
+    assert.deepEqual(enrolled.available_models, [
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "deepseek-v4-flash-vision-exp",
+    ]);
+    assert.deepEqual(issued!.models, [
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "deepseek-v4-flash-vision-exp",
+    ]);
     const originalDeviceToken = enrolled.device_token;
     // Simulate a key issued before canonical V4 ids existed. New clients should see only the
     // canonical catalog, while the old persisted alias remains usable at the data plane.
@@ -483,11 +491,15 @@ test("formal managed enrollment and heartbeat expose both models on the same unc
       originalDeviceToken,
       { hara_version: "0.134.2", os: "darwin" },
     );
-    assert.deepEqual(heartbeat.available_models, ["deepseek-v4-flash", "deepseek-v4-pro"]);
+    assert.deepEqual(heartbeat.available_models, [
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "deepseek-v4-flash-vision-exp",
+    ]);
     assert.equal(enrolled.device_token, originalDeviceToken, "the user-facing key is not rotated");
     assert.deepEqual(synchronized, [{
       keyId: enrolled.device_id,
-      models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"],
+      models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp", "deepseek-chat"],
     }]);
   } finally {
     if (previous.gateway === undefined) delete process.env.GATEWAY_ADAPTER;

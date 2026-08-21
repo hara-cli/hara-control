@@ -2,6 +2,28 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.19 - 2026-08-21
+
+### Added
+
+- Add `deepseek-v4-flash-vision-exp` as the third managed DeepSeek model without changing the default
+  from Flash. Enrollment and the localized administrator console now expose its 1M context, 384K output,
+  full thinking dial, and explicit text-plus-image input capability.
+- Require the production release gate to send an embedded red PNG through the managed visual route,
+  verify the model observes `ff0000`, record positive LiteLLM spend, and delete the temporary key.
+
+### Fixed
+
+- Refresh DeepSeek budget accounting to the official 2026-08-21 peak USD rates. Flash and Vision-Exp use
+  $0.44/M uncached input, $1.32/M output, and $0.014/M cache-hit input; Pro uses $1.32/M, $3.96/M, and
+  $0.044/M respectively. The conservative peak rate prevents a fixed LiteLLM tariff from undercounting
+  company budgets during peak hours; compatibility aliases receive the same correction.
+
+### Security
+
+- Override Prisma's vulnerable `deepmerge-ts` transitive pin with 8.0.0, eliminating the recursive-object
+  stack-exhaustion advisory while retaining the existing Prisma 6 database and migration contract.
+
 ## 0.1.18 - 2026-08-14
 
 ### Added

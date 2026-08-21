@@ -14,17 +14,25 @@ import {
 
 test("formal enrollment defaults to canonical DeepSeek V4 models with discoverable capabilities", () => {
   const env = { GATEWAY_ADAPTER: "litellm" } as NodeJS.ProcessEnv;
-  assert.deepEqual(allowedManagedModels(env), ["deepseek-v4-flash", "deepseek-v4-pro"]);
+  assert.deepEqual(allowedManagedModels(env), [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash-vision-exp",
+  ]);
   assert.equal(defaultManagedModel(env), "deepseek-v4-flash");
   assert.equal(resolveEnrollmentModel("", env), "deepseek-v4-flash");
   assert.deepEqual(
     enrollmentManagedModels("deepseek-v4-flash", env),
-    ["deepseek-v4-flash", "deepseek-v4-pro"],
+    ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
   );
   assert.deepEqual(managedModelThinkingEfforts("deepseek-v4-flash"), ["off", "low", "high", "max"]);
   assert.deepEqual(managedModelThinkingEfforts("deepseek-pro"), ["off", "low", "high", "max"]);
   assert.deepEqual(
-    managedModelsThinkingEfforts(["deepseek-v4-flash", "deepseek-v4-pro"]),
+    managedModelsThinkingEfforts([
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "deepseek-v4-flash-vision-exp",
+    ]),
     ["off", "low", "high", "max"],
   );
   assert.deepEqual(managedModelOptions(env), [
@@ -36,6 +44,7 @@ test("formal enrollment defaults to canonical DeepSeek V4 models with discoverab
       contextWindowTokens: 1_000_000,
       maxOutputTokens: 384_000,
       thinkingEfforts: ["off", "low", "high", "max"],
+      inputModalities: ["text"],
       isDefault: true,
     },
     {
@@ -46,6 +55,18 @@ test("formal enrollment defaults to canonical DeepSeek V4 models with discoverab
       contextWindowTokens: 1_000_000,
       maxOutputTokens: 384_000,
       thinkingEfforts: ["off", "low", "high", "max"],
+      inputModalities: ["text"],
+      isDefault: false,
+    },
+    {
+      id: "deepseek-v4-flash-vision-exp",
+      provider: "deepseek",
+      family: "deepseek-v4",
+      tier: "vision",
+      contextWindowTokens: 1_000_000,
+      maxOutputTokens: 384_000,
+      thinkingEfforts: ["off", "low", "high", "max"],
+      inputModalities: ["text", "image"],
       isDefault: false,
     },
   ]);

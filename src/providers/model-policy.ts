@@ -1,4 +1,8 @@
-const DEFAULT_MANAGED_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
+const DEFAULT_MANAGED_MODELS = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-v4-flash-vision-exp",
+] as const;
 const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 
 const LEGACY_MANAGED_MODEL_ALIASES: Readonly<Record<string, string>> = {
@@ -9,10 +13,11 @@ const LEGACY_MANAGED_MODEL_ALIASES: Readonly<Record<string, string>> = {
 const DEEPSEEK_V4_DETAILS: Readonly<Record<string, {
   provider: "deepseek";
   family: "deepseek-v4";
-  tier: "flash" | "pro";
+  tier: "flash" | "pro" | "vision";
   contextWindowTokens: number;
   maxOutputTokens: number;
   thinkingEfforts: readonly ["off", "low", "high", "max"];
+  inputModalities: readonly ("text" | "image")[];
 }>> = {
   "deepseek-v4-flash": {
     provider: "deepseek",
@@ -21,6 +26,7 @@ const DEEPSEEK_V4_DETAILS: Readonly<Record<string, {
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
     thinkingEfforts: ["off", "low", "high", "max"],
+    inputModalities: ["text"],
   },
   "deepseek-v4-pro": {
     provider: "deepseek",
@@ -29,6 +35,16 @@ const DEEPSEEK_V4_DETAILS: Readonly<Record<string, {
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
     thinkingEfforts: ["off", "low", "high", "max"],
+    inputModalities: ["text"],
+  },
+  "deepseek-v4-flash-vision-exp": {
+    provider: "deepseek",
+    family: "deepseek-v4",
+    tier: "vision",
+    contextWindowTokens: 1_000_000,
+    maxOutputTokens: 384_000,
+    thinkingEfforts: ["off", "low", "high", "max"],
+    inputModalities: ["text", "image"],
   },
 };
 
@@ -40,6 +56,7 @@ export type ManagedModelOption = {
   contextWindowTokens: number | null;
   maxOutputTokens: number | null;
   thinkingEfforts: string[];
+  inputModalities: string[];
   isDefault: boolean;
 };
 
@@ -77,7 +94,7 @@ export function defaultManagedModel(
 }
 
 /** Admin-facing, non-secret model catalog. Unknown deployment-specific aliases remain selectable,
- * but only the two official DeepSeek V4 ids receive capability metadata. */
+ * but only the official DeepSeek V4 ids receive capability metadata. */
 export function managedModelOptions(
   env: NodeJS.ProcessEnv = process.env,
 ): ManagedModelOption[] {
@@ -92,6 +109,7 @@ export function managedModelOptions(
       contextWindowTokens: details?.contextWindowTokens ?? null,
       maxOutputTokens: details?.maxOutputTokens ?? null,
       thinkingEfforts: details ? [...details.thinkingEfforts] : [],
+      inputModalities: details ? [...details.inputModalities] : ["text"],
       isDefault: id === selectedDefault,
     };
   });

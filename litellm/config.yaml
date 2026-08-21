@@ -1,5 +1,5 @@
 # LiteLLM proxy config — the bought/embedded data plane.
-# Two models registered: a local mock (Phase-0, no real key) and the real upstream.
+# Local mock routes support credential-free tests; managed DeepSeek routes use the real upstream.
 # Clients select via the "model" field in the /v1/messages request body.
 
 model_list:
@@ -37,11 +37,12 @@ model_list:
       api_base: https://api.deepseek.com
       api_key: os.environ/UPSTREAM_API_KEY
       allowed_openai_params: [thinking, reasoning_effort]
-    # DeepSeek V4 official USD/token pricing, checked 2026-07-22.
+    # DeepSeek V4 official peak USD/token pricing, checked 2026-08-21. LiteLLM has no time-of-day
+    # tariff switch, so budgets deliberately use the conservative peak rate instead of undercounting.
     model_info:
-      input_cost_per_token: 0.00000014
-      output_cost_per_token: 0.00000028
-      cache_read_input_token_cost: 0.0000000028
+      input_cost_per_token: 0.00000044
+      output_cost_per_token: 0.00000132
+      cache_read_input_token_cost: 0.000000014
   - model_name: deepseek-v4-pro
     litellm_params:
       model: deepseek/deepseek-v4-pro
@@ -49,9 +50,19 @@ model_list:
       api_key: os.environ/UPSTREAM_API_KEY
       allowed_openai_params: [thinking, reasoning_effort]
     model_info:
-      input_cost_per_token: 0.000000435
-      output_cost_per_token: 0.00000087
-      cache_read_input_token_cost: 0.000000003625
+      input_cost_per_token: 0.00000132
+      output_cost_per_token: 0.00000396
+      cache_read_input_token_cost: 0.000000044
+  - model_name: deepseek-v4-flash-vision-exp
+    litellm_params:
+      model: deepseek/deepseek-v4-flash-vision-exp
+      api_base: https://api.deepseek.com
+      api_key: os.environ/UPSTREAM_API_KEY
+      allowed_openai_params: [thinking, reasoning_effort]
+    model_info:
+      input_cost_per_token: 0.00000044
+      output_cost_per_token: 0.00000132
+      cache_read_input_token_cost: 0.000000014
 
   # Compatibility aliases — never advertise these for newly issued keys.
   - model_name: deepseek-chat
@@ -61,9 +72,9 @@ model_list:
       api_key: os.environ/UPSTREAM_API_KEY
       allowed_openai_params: [thinking, reasoning_effort]
     model_info:
-      input_cost_per_token: 0.00000014
-      output_cost_per_token: 0.00000028
-      cache_read_input_token_cost: 0.0000000028
+      input_cost_per_token: 0.00000044
+      output_cost_per_token: 0.00000132
+      cache_read_input_token_cost: 0.000000014
   - model_name: deepseek-pro
     litellm_params:
       model: deepseek/deepseek-v4-pro
@@ -71,9 +82,9 @@ model_list:
       api_key: os.environ/UPSTREAM_API_KEY
       allowed_openai_params: [thinking, reasoning_effort]
     model_info:
-      input_cost_per_token: 0.000000435
-      output_cost_per_token: 0.00000087
-      cache_read_input_token_cost: 0.000000003625
+      input_cost_per_token: 0.00000132
+      output_cost_per_token: 0.00000396
+      cache_read_input_token_cost: 0.000000044
 
 litellm_settings:
   drop_params: true

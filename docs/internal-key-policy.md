@@ -53,8 +53,8 @@ X-Admin-Key: <admin credential>
 
 `model` selects the connection's initial default. It does not mint a model-specific credential: the
 resulting device key is authorized for the deployment's complete managed-model catalog, such as
-`deepseek-v4-flash` and `deepseek-v4-pro`. A user switches models inside the same CLI/Desktop connection
-without replacing the key.
+`deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision-exp`. A user switches models inside
+the same CLI/Desktop connection without replacing the key.
 
 The response returns the one-time code, its exchange expiry, and the normalized `accessPolicy`. Treat the
 code as a credential: deliver it only to its intended colleague, never put it in chat logs, and let it be
@@ -112,7 +112,9 @@ not change 5-hour, 7-day, or 30-day quota progress.
 
 Production readiness also checks positive pricing for every managed model. The deployment gate performs a
 minimal paid request with a temporary virtual key and requires both a spend-log row and positive recorded USD
-spend before declaring the release healthy; the temporary key is deleted even if the check fails.
+spend before declaring the release healthy. The visual route must additionally identify the exact color of an
+attached local data-URL image, proving that LiteLLM did not discard multimodal input. The temporary key is
+deleted even if either check fails.
 
 Internal access policy is distinct from upstream provider-key management. Multiple encrypted upstream
 connections, key-pool routing, weights, and provider health are a separate control-plane feature; changing

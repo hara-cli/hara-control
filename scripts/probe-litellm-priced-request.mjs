@@ -9,7 +9,11 @@ const { PrismaClient } = prismaPackage;
 export const PRICED_PROBE_MODELS = Object.freeze([
   "deepseek-v4-flash",
   "deepseek-v4-pro",
+  "deepseek-v4-flash-vision-exp",
 ]);
+
+export const VISION_PROBE_MODEL = "deepseek-v4-flash-vision-exp";
+const RED_PIXEL_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVRIx+3NMQEAAAjDMMC/ZzDBvlRA01vZJvwHAAAAAAAAAAAAbx2jxAE/ehR5RwAAAABJRU5ErkJggg==";
 
 export const PRICED_PROBE_POLICY = {
   budgetLimits: [
@@ -63,6 +67,44 @@ export function pricedProbeModel(env = process.env) {
     throw new Error(`HARA_PRICED_PROBE_MODEL must be one of ${PRICED_PROBE_MODELS.join(", ")}`);
   }
   return model;
+}
+
+export function pricedProbeCompletionBody(model) {
+  if (model === VISION_PROBE_MODEL) {
+    return {
+      model,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Inspect the attached image. Reply with only the six lowercase hexadecimal digits of its dominant RGB color, without #.",
+          },
+          {
+            type: "image_url",
+            image_url: { url: RED_PIXEL_DATA_URL, detail: "low" },
+          },
+        ],
+      }],
+      thinking: { type: "disabled" },
+      max_tokens: 16,
+      temperature: 0,
+    };
+  }
+  return {
+    model,
+    messages: [{ role: "user", content: "Reply OK" }],
+    max_tokens: 4,
+    temperature: 0,
+  };
+}
+
+export function visionProbeResponseMatches(model, response) {
+  if (model !== VISION_PROBE_MODEL) return true;
+  const content = response?.choices?.[0]?.message?.content;
+  if (typeof content !== "string") return false;
+  const color = content.toLowerCase().match(/#?([0-9a-f]{6})/u)?.[1];
+  return color === "ff0000";
 }
 
 async function jsonPost(fetchImpl, base, path, body, bearer) {
@@ -136,17 +178,18 @@ export async function probeLiteLLMPricedRequest(env = process.env, dependencies 
         "content-type": "application/json",
         authorization: `Bearer ${virtualKey}`,
       },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: "Reply OK" }],
-        max_tokens: 4,
-        temperature: 0,
-      }),
+      body: JSON.stringify(pricedProbeCompletionBody(model)),
       signal: AbortSignal.timeout(30_000),
     });
-    await completion.arrayBuffer();
     issued.key = "";
-    if (!completion.ok) throw new Error(`LiteLLM paid completion returned HTTP ${completion.status}`);
+    if (!completion.ok) {
+      await completion.body?.cancel().catch(() => undefined);
+      throw new Error(`LiteLLM paid completion returned HTTP ${completion.status}`);
+    }
+    const completionBody = await completion.json();
+    if (!visionProbeResponseMatches(model, completionBody)) {
+      throw new Error("LiteLLM vision probe did not identify the attached red image as ff0000");
+    }
 
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const row = await readSpend(prisma, alias);

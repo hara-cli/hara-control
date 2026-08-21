@@ -79,6 +79,9 @@ Config knobs for the above are in [`.env.example`](./.env.example).
 - **One connection, one token, multiple authorized models**: the enrollment model is the initial default.
   The same device credential can switch among the deployment's managed-model catalog, while its lifetime,
   rolling budgets, RPM, and TPM limits continue to apply to the connection as a whole.
+- **DeepSeek V4 with native vision**: the managed catalog exposes Flash and Pro for text, plus
+  `deepseek-v4-flash-vision-exp` for text-and-image input. Deployment readiness sends a real embedded image
+  through that route and requires both a correct visual answer and positive budget accounting.
 - **One organization enrollment, multiple isolated services**: administrators can configure versioned
   Desk, Collab, model-control, and extension-catalog bindings per organization. Routes are not active
   until server-side verification passes; provisioning credentials live only in the KMS envelope store.

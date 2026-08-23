@@ -49,6 +49,24 @@ export class EnrollService {
     if (!ec || ec.usedAt || ec.expiresAt.getTime() < now.getTime()) {
       throw new UnauthorizedException("bad or expired code");
     }
+    const [organization, enrollmentPerson] = await Promise.all([
+      this.prisma.organization.findUnique({
+        where: { id: ec.orgId },
+        select: { id: true, name: true },
+      }),
+      ec.personId
+        ? this.prisma.person.findUnique({
+            where: { id: ec.personId },
+            select: { orgId: true, email: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    // A valid enrollment code without an owning organization indicates damaged control-plane state.
+    // Fail before claiming the one-time code so an operator can repair it without rotating the code.
+    if (!organization) throw new UnauthorizedException("bad or expired code");
+    if (ec.personId && (!enrollmentPerson || enrollmentPerson.orgId !== ec.orgId)) {
+      throw new UnauthorizedException("bad or expired code");
+    }
     await this.entitlement.seatCheck(ec.orgId); // licensed seat cap
     const resolvedModel = resolveEnrollmentModel(ec.model);
     const availableModels = enrollmentManagedModels(resolvedModel);
@@ -125,24 +143,24 @@ export class EnrollService {
       // Desk is an optional organization service, but when configured it is part of this same
       // enrollment boundary. Control holds the shared Desk enrollment secret and returns only the
       // newly minted, separately scoped device bearer to the CLI.
-      const person = ec.personId
-        ? await this.prisma.person.findUnique({
-            where: { id: ec.personId },
-            select: { email: true },
-          })
-        : null;
       const serviceBindings = await this.serviceBindings?.activeForEnrollment(
         ec.orgId,
       ) ?? [];
       const desk = await this.deskProvisioner?.provision({
         orgId: ec.orgId,
-        owner: person?.email || device.name,
+        owner: enrollmentPerson?.email || device.name,
         deviceName: device.name,
       });
 
       return {
         device_token: issued.key,
         device_id: dev.id,
+        tenant_id: organization.id,
+        tenant_name: organization.name
+          .replace(/[\u0000-\u001f\u007f]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 80) || organization.id,
         model: resolvedModel,
         available_models: availableModels,
         thinking_efforts: managedModelsThinkingEfforts(availableModels),

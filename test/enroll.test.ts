@@ -24,6 +24,7 @@ type Code = {
   budgetLimits?: unknown;
   rpmLimit?: number | null;
   tpmLimit?: number | null;
+  personId?: string | null;
 };
 type Dev = { id: string; orgId: string; name: string; os: string; haraVersion: string; lastSeenAt: Date; enrollCodeId: string };
 type Tok = {
@@ -45,6 +46,12 @@ function fakePrisma() {
   const id = () => `id_${++n}`;
   const prisma = {
     db,
+    organization: {
+      findUnique: async ({ where: { id } }: { where: { id: string } }) => ({ id, name: `Organization ${id}` }),
+    },
+    person: {
+      findUnique: async ({ where: { id } }: { where: { id: string } }) => ({ id, orgId: "o1", email: `${id}@example.test` }),
+    },
     enrollCode: {
       findUnique: async ({ where: { code } }: { where: { code: string } }) => db.codes.get(code) ?? null,
       updateMany: async ({
@@ -105,6 +112,29 @@ function fakePrisma() {
   return prisma;
 }
 
+test("enroll: a legacy cross-organization Person binding fails before consuming the code", async () => {
+  const prisma = fakePrisma();
+  prisma.db.codes.set("hara-cross-org", {
+    id: "c-cross-org",
+    orgId: "o1",
+    code: "hara-cross-org",
+    model: "glm-5",
+    baseUrl: null,
+    personId: "person-b",
+    expiresAt: new Date(Date.now() + 60_000),
+    usedAt: null,
+  });
+  prisma.person.findUnique = async () => ({ id: "person-b", orgId: "o2", email: "person-b@example.test" });
+  const service = svcFor(prisma);
+
+  await assert.rejects(
+    () => service.enroll("hara-cross-org", { name: "laptop", os: "macOS", hara_version: "0.1.0" }),
+    /bad or expired code/,
+  );
+  assert.equal(prisma.db.codes.get("hara-cross-org")?.usedAt, null);
+  assert.equal(prisma.db.devices.size, 0);
+});
+
 const fakeAudit = { log: async () => {} } as unknown as AuditService;
 const fakeEntitlement = { assert: () => {}, seatCheck: async () => {} } as unknown as import("../src/license/license.service").EntitlementService;
 const svcFor = (
@@ -133,6 +163,8 @@ test("enroll: valid code -> device token; code is single-use", async () => {
   assert.equal(res.model, "glm-5");
   assert.deepEqual(res.available_models, ["glm-5"]);
   assert.deepEqual(res.thinking_efforts, []);
+  assert.equal(res.tenant_id, "o1");
+  assert.equal(res.tenant_name, "Organization o1");
   assert.ok(res.device_id, "returned a device id");
   assert.equal(prisma.db.tokens.length, 1, "stored exactly one token");
   assert.ok(prisma.db.tokens[0].tokenHash && prisma.db.tokens[0].tokenHash !== res.device_token, "stored the HASH, not the raw token");

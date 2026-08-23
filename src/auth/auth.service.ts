@@ -156,20 +156,42 @@ export class AuthService {
     });
   }
 
+  private async validatedUserOrg(role: AdminRole, orgId?: string | null): Promise<string | null> {
+    const normalized = orgId?.trim() || null;
+    if (role !== AdminRole.SUPERADMIN && !normalized) {
+      throw new BadRequestException("non-SUPERADMIN users must belong to an organization");
+    }
+    if (normalized) {
+      const org = await this.prisma.organization.findUnique({ where: { id: normalized }, select: { id: true } });
+      if (!org) throw new BadRequestException("organization not found");
+    }
+    return normalized;
+  }
+
   async createUser(email: string, password: string, role: AdminRole, orgId?: string) {
     if (password.length < MIN_PASSWORD_LEN) throw new BadRequestException(`password must be ≥${MIN_PASSWORD_LEN} chars`);
     const existing = await this.prisma.adminUser.findUnique({ where: { email: email.toLowerCase() } });
     if (existing) throw new ConflictException("email already in use");
+    const validatedOrgId = await this.validatedUserOrg(role, orgId);
     const user = await this.prisma.adminUser.create({
-      data: { email: email.toLowerCase(), passwordHash: hashPassword(password), role, orgId: orgId ?? null },
+      data: { email: email.toLowerCase(), passwordHash: hashPassword(password), role, orgId: validatedOrgId },
       select: { id: true, email: true, role: true, orgId: true, disabledAt: true, createdAt: true },
     });
     return user;
   }
 
-  async updateUser(id: string, patch: { role?: AdminRole; disabled?: boolean; password?: string }) {
-    const data: { role?: AdminRole; disabledAt?: Date | null; passwordHash?: string } = {};
-    if (patch.role) data.role = patch.role;
+  async updateUser(id: string, patch: { role?: AdminRole; orgId?: string; disabled?: boolean; password?: string }) {
+    const current = await this.prisma.adminUser.findUnique({
+      where: { id },
+      select: { role: true, orgId: true },
+    });
+    if (!current) throw new BadRequestException("user not found");
+    const nextRole = patch.role ?? current.role;
+    const nextOrgId = await this.validatedUserOrg(nextRole, patch.orgId ?? current.orgId);
+    const data: { role?: AdminRole; orgId?: string | null; disabledAt?: Date | null; passwordHash?: string } = {
+      ...(patch.role !== undefined ? { role: patch.role } : {}),
+      ...(patch.orgId !== undefined || nextOrgId !== current.orgId ? { orgId: nextOrgId } : {}),
+    };
     if (patch.disabled !== undefined) data.disabledAt = patch.disabled ? new Date() : null;
     if (patch.password) {
       if (patch.password.length < MIN_PASSWORD_LEN) throw new BadRequestException(`password must be ≥${MIN_PASSWORD_LEN} chars`);

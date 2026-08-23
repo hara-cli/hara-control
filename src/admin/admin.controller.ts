@@ -16,14 +16,16 @@ export class AdminController {
   constructor(private readonly admin: AdminService) {}
 
   @Post("orgs")
-  createOrg(@Body() dto: CreateOrgDto) {
-    return this.admin.createOrg(dto.name, dto.type, dto.parentId);
+  createOrg(@Req() req: { user?: AuthedUser }, @Body() dto: CreateOrgDto) {
+    return this.admin.createOrg(dto.name, req.user!, dto.type, dto.parentId);
   }
 
   @Get("orgs")
   listOrgs(@Req() req: { user?: AuthedUser }) {
     const user = req.user!;
-    return this.admin.listOrgs(user.role === AdminRole.SUPERADMIN || user.viaSharedKey ? undefined : user.orgId);
+    const global = user.role === AdminRole.SUPERADMIN || user.viaSharedKey === true;
+    if (!global && !user.orgId) throw new ForbiddenException("organization access denied");
+    return this.admin.listOrgs(user.orgId ?? null, global);
   }
 
   /** Non-secret, deployment-authoritative choices for new device keys. Keeping this beside the
@@ -39,14 +41,14 @@ export class AdminController {
 
   /** Ancestor chain (leaf-first: [self … root]) for an org unit — where it sits in the hierarchy. */
   @Get("orgs/:id/ancestors")
-  orgAncestors(@Param("id") id: string) {
-    return this.admin.orgAncestors(id);
+  orgAncestors(@Req() req: { user?: AuthedUser }, @Param("id") id: string) {
+    return this.admin.orgAncestors(id, req.user!);
   }
 
   /** All unit ids in the subtree incl. self (e.g. a company + all its departments). */
   @Get("orgs/:id/subtree")
-  orgSubtree(@Param("id") id: string) {
-    return this.admin.orgSubtree(id);
+  orgSubtree(@Req() req: { user?: AuthedUser }, @Param("id") id: string) {
+    return this.admin.orgSubtree(id, req.user!);
   }
 
   @Post("enroll-codes")
@@ -58,10 +60,11 @@ export class AdminController {
     }
     return this.admin.createEnrollCode(
       dto.orgId,
-      dto.model,
+      dto.model ?? "",
       dto.baseUrl,
-      dto.ttlMinutes,
+      dto.ttlMinutes ?? 60,
       dto.personId,
+      user,
       {
         tokenTtlMinutes: dto.tokenTtlMinutes,
         tokenNeverExpires: dto.tokenNeverExpires,

@@ -141,3 +141,40 @@ test("audit chain: append uses serializable isolation and retries a bounded writ
   assert.equal(isolationLevel, "Serializable");
   assert.equal(p.rows.length, 1);
 });
+
+test("audit chain: governance mutation and append share one serializable transaction", async () => {
+  const p = fakePrisma();
+  const events: string[] = [];
+  let isolationLevel = "";
+  const auditCreate = p.auditLog.create;
+  p.auditLog.create = async (input) => {
+    events.push("audit");
+    return auditCreate(input);
+  };
+  (p as unknown as {
+    $transaction: (
+      fn: (tx: unknown) => Promise<unknown>,
+      options?: { isolationLevel?: string },
+    ) => Promise<unknown>;
+  }).$transaction = async (fn, options) => {
+    isolationLevel = options?.isolationLevel ?? "";
+    return fn({
+      auditLog: p.auditLog,
+      role: {
+        create: async () => {
+          events.push("mutation");
+          return { id: "role-1", orgId: "o1" };
+        },
+      },
+    });
+  };
+
+  const result = await svcFor(p).transact("role.create", "admin", "admin-1", async (tx) => {
+    const role = await tx.role.create({ data: { orgId: "o1", key: "reviewer" } } as never);
+    return { result: role.id, orgId: role.orgId, payload: { resourceId: role.id } };
+  });
+  assert.equal(result, "role-1");
+  assert.equal(isolationLevel, "Serializable");
+  assert.deepEqual(events, ["mutation", "audit"]);
+  assert.equal(p.rows.length, 1);
+});

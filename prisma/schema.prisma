@@ -113,6 +113,7 @@ model Organization {
   roles            Role[]
   teams            Team[]
   persons          Person[]
+  personTeams      PersonTeam[]
   digitalEmployees DigitalEmployee[]
   assets           Asset[]
   workSessions     WorkSession[]
@@ -170,7 +171,7 @@ model EnrollCode {
 
   // per-person enroll: binds the enrolled device to a Person so it inherits that person's
   // digital-employee assignments from the first heartbeat (authoritative binding).
-  person   Person? @relation(fields: [personId], references: [id])
+  person   Person? @relation(fields: [personId, orgId], references: [id, orgId], onDelete: Restrict)
   personId String?
 
   device Device?
@@ -192,7 +193,7 @@ model Device {
   enrollCode   EnrollCode? @relation(fields: [enrollCodeId], references: [id])
   enrollCodeId String?     @unique
 
-  person   Person? @relation(fields: [personId], references: [id])
+  person   Person? @relation(fields: [personId, orgId], references: [id, orgId], onDelete: Restrict)
   personId String?
 
   tokens       DeviceToken[]
@@ -377,6 +378,7 @@ model Role {
   assignments DigitalEmployee[]
 
   @@unique([orgId, key])
+  @@unique([id, orgId])
   @@index([orgId])
 }
 
@@ -393,6 +395,7 @@ model Team {
   assets      Asset[]
 
   @@unique([orgId, name])
+  @@unique([id, orgId])
   @@index([orgId])
 }
 
@@ -411,16 +414,20 @@ model Person {
   workSessions WorkSession[]
 
   @@unique([orgId, email])
+  @@unique([id, orgId])
   @@index([orgId])
 }
 
 model PersonTeam {
-  person   Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId    String
+  person   Person @relation(fields: [personId, orgId], references: [id, orgId], onDelete: Cascade)
   personId String
-  team     Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team     Team   @relation(fields: [teamId, orgId], references: [id, orgId], onDelete: Cascade)
   teamId   String
 
   @@id([personId, teamId])
+  @@index([orgId])
 }
 
 /// A "digital employee" = a Role instance granted to a Person and/or Team. The unit the admin
@@ -429,11 +436,11 @@ model DigitalEmployee {
   id        String       @id @default(uuid())
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   orgId     String
-  role      Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  role      Role         @relation(fields: [roleId, orgId], references: [id, orgId], onDelete: Cascade)
   roleId    String
-  person    Person?      @relation(fields: [personId], references: [id], onDelete: Cascade)
+  person    Person?      @relation(fields: [personId, orgId], references: [id, orgId], onDelete: Cascade)
   personId  String?
-  team      Team?        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team      Team?        @relation(fields: [teamId, orgId], references: [id, orgId], onDelete: Cascade)
   teamId    String?
   name      String       @default("") // display name, e.g. "Payments Reviewer"
   status    String       @default("active") // active | suspended

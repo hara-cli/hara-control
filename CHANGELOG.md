@@ -2,6 +2,36 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.23 - 2026-08-23
+
+### Added
+
+- Return the Control-authoritative organization ID and public name during enrollment so Hara can collapse
+  multiple local gateway connections into one durable company Space without treating a profile alias as a
+  tenant identity.
+- Add a real PostgreSQL migration regression that proves the organization-integrity constraints apply on a
+  clean legacy schema, reject cross-company writes, and leave no partial DDL behind when dirty legacy rows
+  force the migration transaction to roll back.
+
+### Fixed
+
+- Make the live PostgreSQL release gate fail immediately when Compose startup, database readiness, or Control
+  readiness fails, with bounded diagnostics instead of continuing into a misleading downstream error. A local
+  test helper can run the same gate against an isolated temporary PostgreSQL cluster without Docker.
+
+### Security
+
+- Enforce organization access on every role, person, team, assignment, policy, digital-employee, and device
+  bundle administration route, including routes that begin from an opaque resource ID. Reject cross-company
+  person/team/role assignments before any database write.
+- Attribute governance audit events to the authenticated administrator instead of a fixed placeholder, keep
+  the changed resource ID in the payload, and merge model allow-lists by intersection so a team policy can
+  only narrow its company's authorized model set. An explicit empty allow-list remains deny-all.
+- Commit organization creation, enrollment-code creation, device-registry revocation, and role/assignment
+  governance mutations migrated in this release with their chained audit event in the same serializable
+  transaction, including bounded retries for serialization conflicts. Other administration families retain
+  their existing audit behavior and are not claimed as transactionally migrated here.
+
 ## 0.1.22 - 2026-08-22
 
 ### Added

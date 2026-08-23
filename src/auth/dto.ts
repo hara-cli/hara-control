@@ -34,6 +34,7 @@ export class CreateUserDto {
 
 export class UpdateUserDto {
   @IsEnum(AdminRole) @IsOptional() role?: AdminRole;
+  @IsString() @IsNotEmpty() @IsOptional() orgId?: string;
   @IsBoolean() @IsOptional() disabled?: boolean;
   @IsString() @IsOptional() @MinLength(12) password?: string;
 }

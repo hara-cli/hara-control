@@ -1,6 +1,6 @@
 {
   "name": "hara-control",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "private": true,
   "description": "Apache-2.0 self-hosted control plane for the Hara fleet.",
   "license": "Apache-2.0",
@@ -14,7 +14,9 @@
     "prisma:deploy": "node scripts/recover-known-failed-migration.mjs && prisma migrate deploy",
     "admin": "tsx cli/admin.ts",
     "provider-secret": "node dist/ops/provider-secret.js",
-    "test": "node --test --import tsx test/*.test.ts"
+    "test": "node --test --import tsx test/*.test.ts",
+    "test:e2e:local-postgres": "bash scripts/e2e-local-postgres.sh",
+    "test:migration:postgres": "bash scripts/test-org-integrity-migration.sh"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.28",

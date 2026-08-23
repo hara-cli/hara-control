@@ -235,8 +235,16 @@ delegated to your IdP via SSO (enterprise).
 
 ## Update / backup / uninstall
 
+For the `0.1.23` organization-integrity migration, first stop or drain Control write traffic, then run the
+migration and restart the service. The migration is one PostgreSQL transaction: existing constraints protect
+the old schema until the new composite constraints acquire their locks, and any cross-organization legacy row
+or concurrent invalid write rolls the entire migration back without partial DDL. Inspect and repair the
+reported row before retrying; do not bypass the constraint or mark the migration as applied manually.
+
 ```bash
-git pull && npm ci && npm run build && npx prisma migrate deploy && systemctl restart hara-control
+systemctl stop hara-control
+git pull && npm ci && npm run build && npx prisma migrate deploy
+systemctl start hara-control
 ```
 - **Backup:** `pg_dump` the DB + back up `.env` (holds the admin + upstream keys) out-of-band.
   If you set `HARA_KMS_MASTER_KEY`, back it up separately — losing it loses anything encrypted.

@@ -12,6 +12,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
   Max,
   Min,
   ValidateNested,
@@ -44,7 +46,7 @@ export class HeartbeatDto {
 }
 
 export class CreateOrgDto {
-  @IsString() @IsNotEmpty() name!: string;
+  @IsString() @IsNotEmpty() @MaxLength(80) @Matches(/^[^\u0000-\u001f\u007f]+$/) name!: string;
   // Hierarchy (additive): defaults to a standalone COMPANY root if both are omitted, so the old
   // `POST /admin/orgs {name}` contract is unchanged. Set type=DEPARTMENT + parentId=<companyId> to nest.
   @IsEnum(OrgUnitType) @IsOptional() type?: OrgUnitType;

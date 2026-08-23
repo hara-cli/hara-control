@@ -37,39 +37,66 @@ export class AuditService {
     };
   }
 
-  async log(orgId: string, action: string, actorType: string, actorId = "", payload: Record<string, unknown> = {}) {
-    // SERIALIZABLE makes concurrent readers of the same chain head conflict. Retry those bounded
-    // conflicts; the database's unique (orgId, seq) constraint is the final fail-closed guard.
+  private async append(
+    tx: Prisma.TransactionClient,
+    orgId: string,
+    action: string,
+    actorType: string,
+    actorId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const prev = await tx.auditLog.findFirst({ where: { orgId }, orderBy: { seq: "desc" } });
+    const seq = (prev?.seq ?? -1) + 1;
+    const prevHash = prev?.rowHash ?? "";
+    const at = new Date();
+    const rowHash = chainHash(this.identity({ orgId, action, actorType, actorId, payload, seq, at }), prevHash);
+    await tx.auditLog.create({
+      data: {
+        orgId,
+        action,
+        actorType,
+        actorId,
+        payload: payload as Prisma.InputJsonValue,
+        at,
+        seq,
+        prevHash,
+        rowHash,
+      },
+    });
+  }
+
+  /**
+   * Commit a governance mutation and its audit-chain append in one SERIALIZABLE transaction. The
+   * callback must contain database work only: it can be retried after a serialization conflict.
+   */
+  async transact<T>(
+    action: string,
+    actorType: string,
+    actorId: string,
+    mutation: (tx: Prisma.TransactionClient) => Promise<{
+      result: T;
+      orgId: string;
+      payload?: Record<string, unknown>;
+    }>,
+  ): Promise<T> {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       try {
-        await this.prisma.$transaction(async (tx) => {
-          const prev = await tx.auditLog.findFirst({ where: { orgId }, orderBy: { seq: "desc" } });
-          const seq = (prev?.seq ?? -1) + 1;
-          const prevHash = prev?.rowHash ?? "";
-          const at = new Date();
-          const rowHash = chainHash(this.identity({ orgId, action, actorType, actorId, payload, seq, at }), prevHash);
-          await tx.auditLog.create({
-            data: {
-              orgId,
-              action,
-              actorType,
-              actorId,
-              payload: payload as Prisma.InputJsonValue,
-              at,
-              seq,
-              prevHash,
-              rowHash,
-            },
-          });
+        return await this.prisma.$transaction(async (tx) => {
+          const audited = await mutation(tx);
+          await this.append(tx, audited.orgId, action, actorType, actorId, audited.payload ?? {});
+          return audited.result;
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-        return;
       } catch (error) {
         const code = (error as { code?: unknown }).code;
         const conflict = code === "P2034" || code === "P2002";
         if (!conflict || attempt === 3) throw error;
       }
     }
-    throw new Error("unreachable audit append state");
+    throw new Error("unreachable audited transaction state");
+  }
+
+  async log(orgId: string, action: string, actorType: string, actorId = "", payload: Record<string, unknown> = {}) {
+    await this.transact(action, actorType, actorId, async () => ({ result: undefined, orgId, payload }));
   }
 
   /**

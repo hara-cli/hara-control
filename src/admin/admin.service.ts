@@ -1,5 +1,5 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
-import { OrgUnitType, Prisma } from "@prisma/client";
+import { BadRequestException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { AdminRole, OrgUnitType, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { OrgTreeService } from "../org/org-tree.service";
@@ -31,12 +31,27 @@ export class AdminService {
     @Inject(GATEWAY_ADAPTER) private readonly gateway: GatewayAdapter,
   ) {}
 
-  listOrgs(orgId?: string | null) {
+  listOrgs(orgId: string | null, global = false) {
+    if (!global && !orgId) throw new ForbiddenException("organization access denied");
     return this.prisma.organization.findMany({
-      where: orgId ? { id: orgId } : undefined,
+      where: global ? undefined : { id: orgId! },
       select: { id: true, name: true, type: true, parentId: true },
       orderBy: [{ name: "asc" }, { createdAt: "asc" }],
     });
+  }
+
+  private isGlobalOperator(actor: AuthedUser): boolean {
+    return actor.viaSharedKey === true || actor.role === AdminRole.SUPERADMIN;
+  }
+
+  /** Tenant admins may operate on their assigned company and units below it, never on another tree. */
+  private async assertOrgTreeAccess(actor: AuthedUser, targetOrgId: string): Promise<void> {
+    if (this.isGlobalOperator(actor)) return;
+    if (!actor.orgId) throw new ForbiddenException("organization access denied");
+    const ancestors = await this.orgTree.ancestors(targetOrgId);
+    if (!ancestors.some((org) => org.id === actor.orgId)) {
+      throw new ForbiddenException("organization access denied");
+    }
   }
 
   /**
@@ -45,36 +60,63 @@ export class AdminService {
    * (e.g. a DEPARTMENT under a COMPANY). Nesting is advisory — we validate the parent EXISTS but don't
    * hard-enforce the type ordering, keeping the model flexible to extend to a group later.
    */
-  async createOrg(name: string, type: OrgUnitType = OrgUnitType.COMPANY, parentId?: string) {
-    if (parentId) {
-      const parent = await this.prisma.organization.findUnique({ where: { id: parentId } });
-      if (!parent) throw new BadRequestException(`parent org "${parentId}" not found`);
+  async createOrg(
+    name: string,
+    actor: AuthedUser,
+    type: OrgUnitType = OrgUnitType.COMPANY,
+    parentId?: string,
+  ) {
+    const normalizedName = name.trim();
+    if (!normalizedName || normalizedName.length > 80 || /[\u0000-\u001f\u007f]/.test(normalizedName)) {
+      throw new BadRequestException("organization name must be 1-80 printable characters");
     }
-    const org = await this.prisma.organization.create({ data: { name, type, parentId: parentId ?? null } });
-    // Audit under the unit's OWN id so a per-org chain exists from creation; record where it sits.
-    await this.audit.log(org.id, "org.create", "admin", "", { name, type, parentId: parentId ?? null });
-    return org;
+    if (!parentId && !this.isGlobalOperator(actor)) {
+      throw new ForbiddenException("creating a root company requires SUPERADMIN");
+    }
+    if (parentId) await this.assertOrgTreeAccess(actor, parentId);
+    return this.audit.transact(
+      "org.create",
+      actor.viaSharedKey ? "shared-key" : "admin",
+      actor.id,
+      async (tx) => {
+        if (parentId) {
+          const parent = await tx.organization.findUnique({ where: { id: parentId } });
+          if (!parent) throw new BadRequestException(`parent org "${parentId}" not found`);
+        }
+        const org = await tx.organization.create({ data: { name: normalizedName, type, parentId: parentId ?? null } });
+        // Audit under the unit's OWN id so a per-org chain exists from creation; record where it sits.
+        return {
+          result: org,
+          orgId: org.id,
+          payload: { name: normalizedName, type, parentId: parentId ?? null },
+        };
+      },
+    );
   }
 
   /** The ancestor chain (leaf-first: [self … root]) — for an admin "where does this unit sit" view. */
-  orgAncestors(orgId: string) {
+  async orgAncestors(orgId: string, actor: AuthedUser) {
+    await this.assertOrgTreeAccess(actor, orgId);
     return this.orgTree.ancestors(orgId);
   }
 
   /** All unit ids in the subtree (incl. self) — e.g. "this company + all its departments". */
-  orgSubtree(orgId: string) {
+  async orgSubtree(orgId: string, actor: AuthedUser) {
+    await this.assertOrgTreeAccess(actor, orgId);
     return this.orgTree.descendants(orgId);
   }
 
   async createEnrollCode(
     orgId: string,
-    model = "",
-    baseUrl?: string,
-    ttlMinutes = 60,
-    personId?: string,
+    model: string,
+    baseUrl: string | undefined,
+    ttlMinutes: number,
+    personId: string | undefined,
+    actor: AuthedUser,
     keyPolicy: AccessKeyPolicyInput = {},
     now = new Date(),
   ) {
+    if (!actor?.id) throw new BadRequestException("authenticated audit actor is required");
     let resolvedModel: string;
     let accessPolicy: StoredAccessKeyPolicy;
     try {
@@ -84,35 +126,49 @@ export class AdminService {
       throw new BadRequestException((error as Error).message);
     }
     const models = enrollmentManagedModels(resolvedModel);
-    const ec = await this.prisma.enrollCode.create({
-      data: {
-        orgId,
-        code: randomId("hara-", 9),
-        model: resolvedModel,
-        baseUrl: baseUrl ?? null,
-        personId: personId ?? null,
-        expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
-        tokenTtlMinutes: accessPolicy.tokenTtlMinutes,
-        tokenNeverExpires: accessPolicy.tokenNeverExpires,
-        budgetLimits: accessPolicy.budgetLimits as unknown as Prisma.InputJsonValue,
-        rpmLimit: accessPolicy.rpmLimit,
-        tpmLimit: accessPolicy.tpmLimit,
+    return this.audit.transact(
+      "enroll_code.create",
+      actor.viaSharedKey ? "shared-key" : "admin",
+      actor.id,
+      async (tx) => {
+        if (personId) {
+          const person = await tx.person.findUnique({
+            where: { id: personId },
+            select: { orgId: true },
+          });
+          if (!person) throw new BadRequestException("person not found");
+          if (person.orgId !== orgId) {
+            throw new BadRequestException("enrollment person must belong to the same organization");
+          }
+        }
+        const ec = await tx.enrollCode.create({
+          data: {
+            orgId,
+            code: randomId("hara-", 9),
+            model: resolvedModel,
+            baseUrl: baseUrl ?? null,
+            personId: personId ?? null,
+            expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
+            tokenTtlMinutes: accessPolicy.tokenTtlMinutes,
+            tokenNeverExpires: accessPolicy.tokenNeverExpires,
+            budgetLimits: accessPolicy.budgetLimits as unknown as Prisma.InputJsonValue,
+            rpmLimit: accessPolicy.rpmLimit,
+            tpmLimit: accessPolicy.tpmLimit,
+          },
+        });
+        return {
+          result: {
+            code: ec.code,
+            model: resolvedModel,
+            models,
+            expiresAt: ec.expiresAt,
+            accessPolicy,
+          },
+          orgId,
+          payload: { model: resolvedModel, models, ttlMinutes, personId, accessPolicy },
+        };
       },
-    });
-    await this.audit.log(orgId, "enroll_code.create", "admin", "", {
-      model: resolvedModel,
-      models,
-      ttlMinutes,
-      personId,
-      accessPolicy,
-    });
-    return {
-      code: ec.code,
-      model: resolvedModel,
-      models,
-      expiresAt: ec.expiresAt,
-      accessPolicy,
-    };
+    );
   }
 
   /** Read-only fleet view: who's online, version, token status, spend (joined from the gateway). */
@@ -305,17 +361,35 @@ export class AdminService {
   }
 
   /** Revoke every live token for a device — at the gateway and in our registry. */
-  async revokeDevice(deviceId: string, user?: AuthedUser, now = new Date()) {
+  async revokeDevice(deviceId: string, user: AuthedUser, now = new Date()) {
     const dev = await this.prisma.device.findUnique({ where: { id: deviceId } });
     if (!dev) return { revoked: 0 };
-    if (user) assertAdminOrgAccess(user, dev.orgId);
+    assertAdminOrgAccess(user, dev.orgId);
     const tokens = await this.prisma.deviceToken.findMany({ where: { deviceId, revokedAt: null } });
+    // Remote revocation is the security boundary. Never claim or persist local success while any gateway
+    // key may still consume quota. A partial remote failure leaves local rows active and the request failed,
+    // making the operation safely retryable instead of producing a false-green fleet view.
     for (const t of tokens) {
-      await this.gateway.revokeKey(t.gatewayKeyId).catch(() => undefined);
-      await this.prisma.deviceToken.update({ where: { id: t.id }, data: { revokedAt: now } });
+      await this.gateway.revokeKey(t.gatewayKeyId);
     }
-    await this.audit.log(dev.orgId, "revoke", "admin", deviceId, { tokens: tokens.length });
-    return { revoked: tokens.length };
+    return this.audit.transact(
+      "device.revoke",
+      user.viaSharedKey ? "shared-key" : "admin",
+      user.id,
+      async (tx) => {
+        const revoked = tokens.length
+          ? await tx.deviceToken.updateMany({
+              where: { id: { in: tokens.map((token) => token.id) }, deviceId, revokedAt: null },
+              data: { revokedAt: now },
+            })
+          : { count: 0 };
+        return {
+          result: { revoked: revoked.count },
+          orgId: dev.orgId,
+          payload: { deviceId, tokens: revoked.count },
+        };
+      },
+    );
   }
 
   /** Tamper-evidence check: recompute the org's audit hash chain and report the first break (if any). */

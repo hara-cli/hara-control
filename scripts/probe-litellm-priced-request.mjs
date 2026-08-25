@@ -80,7 +80,7 @@ export function pricedProbeCompletionBody(model) {
         content: [
           {
             type: "text",
-            text: "Look at the attached image. How many separate black squares are shown? Reply with exactly one digit.",
+            text: "Look at the attached image. Call report_square_count exactly once with the number of separate black squares. Do not answer in prose.",
           },
           {
             type: "image_url",
@@ -89,6 +89,20 @@ export function pricedProbeCompletionBody(model) {
         ],
       }],
       thinking: { type: "disabled" },
+      tools: [{
+        type: "function",
+        function: {
+          name: "report_square_count",
+          description: "Report the number of separate black squares observed in the attached image.",
+          parameters: {
+            type: "object",
+            properties: { count: { type: "integer" } },
+            required: ["count"],
+            additionalProperties: false,
+          },
+        },
+      }],
+      tool_choice: { type: "function", function: { name: "report_square_count" } },
       max_tokens: 128,
       temperature: 0,
     };
@@ -103,9 +117,22 @@ export function pricedProbeCompletionBody(model) {
 
 export function visionProbeResponseMatches(model, response) {
   if (model !== VISION_PROBE_MODEL) return true;
-  const content = response?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") return false;
-  return /(?:^|\D)3(?:\D|$)/u.test(content.trim());
+  const toolCalls = response?.choices?.[0]?.message?.tool_calls;
+  if (!Array.isArray(toolCalls) || toolCalls.length !== 1) return false;
+  const call = toolCalls[0]?.function;
+  if (call?.name !== "report_square_count" || typeof call.arguments !== "string") return false;
+  try {
+    const args = JSON.parse(call.arguments);
+    return (
+      args
+      && typeof args === "object"
+      && !Array.isArray(args)
+      && Object.keys(args).length === 1
+      && args.count === 3
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function jsonPost(fetchImpl, base, path, body, bearer) {
@@ -189,7 +216,7 @@ export async function probeLiteLLMPricedRequest(env = process.env, dependencies 
     }
     const completionBody = await completion.json();
     if (!visionProbeResponseMatches(model, completionBody)) {
-      throw new Error("LiteLLM vision probe did not count the three attached squares");
+      throw new Error("LiteLLM vision probe did not return one valid report_square_count tool call for the three attached squares");
     }
 
     for (let attempt = 0; attempt < 30; attempt += 1) {

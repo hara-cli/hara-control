@@ -26,7 +26,7 @@ test("priced-request probe accepts only the three managed canonical V4 routes", 
   );
 });
 
-test("vision priced-request probe sends a 512px semantic image and requires the observed object count", () => {
+test("vision priced-request probe sends a 512px semantic image and requires one valid tool call", () => {
   const body = pricedProbeCompletionBody(VISION_PROBE_MODEL);
   assert.equal(body.model, VISION_PROBE_MODEL);
   assert.deepEqual(body.thinking, { type: "disabled" });
@@ -36,12 +36,20 @@ test("vision priced-request probe sends a 512px semantic image and requires the 
   assert.equal(png.readUInt32BE(16), 512);
   assert.equal(png.readUInt32BE(20), 512);
   assert.equal(body.messages[0].content[1].image_url.detail, "original");
+  assert.equal(body.tools[0].function.name, "report_square_count");
+  assert.deepEqual(body.tool_choice, { type: "function", function: { name: "report_square_count" } });
   assert.equal(body.max_tokens, 128);
   assert.equal(visionProbeResponseMatches(VISION_PROBE_MODEL, {
-    choices: [{ message: { content: "3" } }],
+    choices: [{ message: { tool_calls: [{ function: { name: "report_square_count", arguments: "{\"count\":3}" } }] } }],
   }), true);
   assert.equal(visionProbeResponseMatches(VISION_PROBE_MODEL, {
-    choices: [{ message: { content: "1" } }],
+    choices: [{ message: { tool_calls: [{ function: { name: "report_square_count", arguments: "{\"count\":1}" } }] } }],
+  }), false);
+  assert.equal(visionProbeResponseMatches(VISION_PROBE_MODEL, {
+    choices: [{ message: { content: "3" } }],
+  }), false);
+  assert.equal(visionProbeResponseMatches(VISION_PROBE_MODEL, {
+    choices: [{ message: { tool_calls: [{ function: { name: "report_square_count", arguments: "{\"count\":" } }] } }],
   }), false);
   assert.equal(visionProbeResponseMatches("deepseek-v4-flash", { choices: [] }), true);
 });

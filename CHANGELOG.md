@@ -2,6 +2,18 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.24 - 2026-08-25
+
+### Fixed
+
+- Strengthen the paid DeepSeek visual-model deployment gate so a successful release must preserve both the
+  attached 512×512 three-object image and native tool-call semantics. The probe now forces exactly one
+  no-side-effect `report_square_count` function call, validates strict JSON arguments with the observed count,
+  still requires positive priced usage, and deletes its temporary virtual key before promotion.
+- Reject text-only answers, malformed or extra tool arguments, incorrect counts, and missing or duplicate tool
+  calls. A plain HTTP 200 can no longer promote a visual route whose image understanding works but whose Agent
+  tool protocol has regressed.
+
 ## 0.1.23 - 2026-08-23
 
 ### Added

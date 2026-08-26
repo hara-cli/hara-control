@@ -76,7 +76,13 @@ const ok = (c, m) => { if (!c) throw new Error(`assertion failed: ${m}`); };
   r = await adminReq("/admin/assignments", { orgId: org.id, roleId: reviewerRole.id, personId: person.id, name: "Code Reviewer" });
   ok(r.ok, `assign digital employee -> ${r.status}`);
 
-  r = await adminReq(`/admin/orgs/${org.id}/policy`, { policy: { requireApprovalForWrites: true, modelDeny: ["gpt-4o"] } }, "PATCH");
+  r = await adminReq(`/admin/orgs/${org.id}/policy`, {
+    policy: {
+      requireApprovalForWrites: true,
+      modelDeny: ["gpt-4o"],
+      allowPersonalModelConnections: true,
+    },
+  }, "PATCH");
   ok(r.ok, `set org policy -> ${r.status}`);
 
   // per-person enroll: the new device inherits this person's digital employees
@@ -96,6 +102,7 @@ const ok = (c, m) => { if (!c) throw new Error(`assertion failed: ${m}`); };
   ok(bundle.roles[0].system === "You review code.", "role carries its system prompt");
   ok(bundle.org_policy.requireApprovalForWrites === true, "org policy (approval) pushed down");
   ok(Array.isArray(bundle.org_policy.modelDeny) && bundle.org_policy.modelDeny.includes("gpt-4o"), "org policy (model deny) pushed down");
+  ok(bundle.org_policy.allowPersonalModelConnections === true, "org policy (member-owned model route) pushed down");
 
   r = await adminReq(`/admin/digital-employees?orgId=${org.id}`, null, "GET");
   ok(r.ok, `list digital-employees -> ${r.status}`);

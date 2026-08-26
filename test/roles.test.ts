@@ -37,16 +37,29 @@ const assignment = (assignedRole: ReturnType<typeof role>, over: Record<string, 
   ...over,
 });
 
-test("mergePolicy: deny-lists union, approval flag OR-s, allow-lists intersect", () => {
+test("mergePolicy: deny-lists union, approval flag OR-s, and explicit allows only narrow", () => {
   const m = mergePolicy(
-    { modelDeny: ["a"], toolDeny: ["bash"] },
+    { modelDeny: ["a"], toolDeny: ["bash"], allowPersonalModelConnections: true },
     { modelDeny: ["b"], requireApprovalForWrites: true, modelAllow: ["x", "y"] },
-    { modelAllow: ["y", "z"] },
+    { modelAllow: ["y", "z"], allowPersonalModelConnections: false },
   );
   assert.deepEqual([...m.modelDeny!].sort(), ["a", "b"]);
   assert.deepEqual(m.toolDeny, ["bash"]);
   assert.equal(m.requireApprovalForWrites, true);
   assert.deepEqual(m.modelAllow, ["y"]);
+  assert.equal(m.allowPersonalModelConnections, false, "a lower layer may deny but never widen company BYOK consent");
+});
+
+test("mergePolicy: omitted personal-route consent remains fail-closed while an explicit org allow survives inheritance", () => {
+  assert.equal(mergePolicy({ modelAllow: ["x"] }).allowPersonalModelConnections, undefined);
+  assert.equal(
+    mergePolicy({ allowPersonalModelConnections: true }, { toolDeny: ["bash"] }).allowPersonalModelConnections,
+    true,
+  );
+  assert.throws(
+    () => mergePolicy({ allowPersonalModelConnections: "yes" } as never),
+    /allowPersonalModelConnections must be a boolean/,
+  );
 });
 
 test("mergePolicy: an explicit empty allow-list remains deny-all", () => {

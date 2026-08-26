@@ -13,6 +13,9 @@ export type Policy = {
   modelDeny?: string[];
   toolDeny?: string[];
   requireApprovalForWrites?: boolean;
+  /** Explicit company consent for sending company-scoped context through a member-owned BYOK route.
+   * Omitted is deny at the client boundary; lower policy layers may only narrow an inherited allow. */
+  allowPersonalModelConnections?: boolean;
   budget?: number | Record<string, unknown>;
 };
 
@@ -56,7 +59,14 @@ export function normalizePolicy(value: unknown): Policy {
     throw new BadRequestException("policy must be an object");
   }
   const input = value as Record<string, unknown>;
-  const supported = new Set(["modelAllow", "modelDeny", "toolDeny", "requireApprovalForWrites", "budget"]);
+  const supported = new Set([
+    "modelAllow",
+    "modelDeny",
+    "toolDeny",
+    "requireApprovalForWrites",
+    "allowPersonalModelConnections",
+    "budget",
+  ]);
   const unknown = Object.keys(input).filter((key) => !supported.has(key));
   if (unknown.length) {
     throw new BadRequestException(`policy contains unsupported field '${unknown[0]}'`);
@@ -64,11 +74,17 @@ export function normalizePolicy(value: unknown): Policy {
   if (input.requireApprovalForWrites !== undefined && typeof input.requireApprovalForWrites !== "boolean") {
     throw new BadRequestException("requireApprovalForWrites must be a boolean");
   }
+  if (input.allowPersonalModelConnections !== undefined && typeof input.allowPersonalModelConnections !== "boolean") {
+    throw new BadRequestException("allowPersonalModelConnections must be a boolean");
+  }
   return {
     ...(input.modelDeny !== undefined ? { modelDeny: normalizedStringList(input.modelDeny, "modelDeny") } : {}),
     ...(input.modelAllow !== undefined ? { modelAllow: normalizedStringList(input.modelAllow, "modelAllow") } : {}),
     ...(input.toolDeny !== undefined ? { toolDeny: normalizedStringList(input.toolDeny, "toolDeny") } : {}),
     ...(input.requireApprovalForWrites === true ? { requireApprovalForWrites: true } : {}),
+    ...(input.allowPersonalModelConnections !== undefined
+      ? { allowPersonalModelConnections: input.allowPersonalModelConnections }
+      : {}),
     ...(input.budget !== undefined ? { budget: normalizedBudget(input.budget) } : {}),
   };
 }
@@ -98,6 +114,7 @@ export function mergePolicy(...layers: (Policy | undefined | null)[]): Policy {
   const toolDeny = new Set<string>();
   let modelAllow: Set<string> | undefined;
   let requireApprovalForWrites = false;
+  let allowPersonalModelConnections: boolean | undefined;
   let budget: Policy["budget"];
   for (const raw of layers) {
     if (!raw) continue;
@@ -111,6 +128,11 @@ export function mergePolicy(...layers: (Policy | undefined | null)[]): Policy {
         : new Set([...modelAllow].filter((model) => layerAllow.has(model)));
     }
     if (p.requireApprovalForWrites) requireApprovalForWrites = true;
+    if (p.allowPersonalModelConnections !== undefined) {
+      allowPersonalModelConnections = allowPersonalModelConnections === undefined
+        ? p.allowPersonalModelConnections
+        : allowPersonalModelConnections && p.allowPersonalModelConnections;
+    }
     budget = restrictiveBudget(budget, p.budget);
   }
   const out: Policy = {};
@@ -118,6 +140,9 @@ export function mergePolicy(...layers: (Policy | undefined | null)[]): Policy {
   if (toolDeny.size) out.toolDeny = [...toolDeny].sort();
   if (modelAllow !== undefined) out.modelAllow = [...modelAllow].sort();
   if (requireApprovalForWrites) out.requireApprovalForWrites = true;
+  if (allowPersonalModelConnections !== undefined) {
+    out.allowPersonalModelConnections = allowPersonalModelConnections;
+  }
   if (budget !== undefined) out.budget = budget;
   return out;
 }

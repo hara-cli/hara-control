@@ -2,6 +2,20 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.25 - 2026-08-26
+
+### Added
+
+- Add an administrator-controlled `allowPersonalModelConnections` organization policy. An explicit allow lets
+  a member fund model inference with a personal API connection while the conversation remains in the company
+  Space; omitted or false policy remains fail-closed.
+
+### Security
+
+- Carry the policy through the same normalized, audited organization/team/assignment policy bundle used for
+  model, tool, approval, and budget governance. Lower policy layers may deny an inherited allow but cannot
+  widen a company-level denial, and Hara refreshes this Control-owned decision before every personal-key turn.
+
 ## 0.1.24 - 2026-08-25
 
 ### Fixed

@@ -99,7 +99,7 @@ model Organization {
   name      String
   type      OrgUnitType @default(COMPANY) // 集团/公司/部门/组 — advisory nesting, not hard-enforced
   parentId  String? // null = a root unit (a standalone COMPANY, or a GROUP top); set = a child unit
-  policy    Json        @default("{}") // governance: modelDeny / requireApprovalForWrites / toolDeny / budget
+  policy    Json        @default("{}") // governance: model/model-route/tool/approval/budget constraints
   learningVersion Int   @default(0) // monotonic watermark for approved/revoked organization learning bundles
   createdAt DateTime    @default(now())
 
@@ -387,7 +387,7 @@ model Team {
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   orgId     String
   name      String
-  policy    Json         @default("{}") // team governance: modelDeny / requireApprovalForWrites / toolDeny / budget
+  policy    Json         @default("{}") // team governance: model/model-route/tool/approval/budget constraints
   createdAt DateTime     @default(now())
 
   members     PersonTeam[]

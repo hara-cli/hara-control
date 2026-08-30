@@ -60,6 +60,11 @@ export type ManagedModelOption = {
   isDefault: boolean;
 };
 
+export type ManagedModelCapability = {
+  model: string;
+  thinkingEfforts: string[];
+};
+
 /** Keep already-issued codes and deployments configured with Hara's pre-V4 aliases usable, while
  * every new code and client profile receives the provider's canonical model id. */
 export function canonicalManagedModelId(model: string): string {
@@ -120,6 +125,32 @@ export function managedModelOptions(
 export function managedModelThinkingEfforts(model: string): string[] {
   const details = DEEPSEEK_V4_DETAILS[canonicalManagedModelId(model)];
   return details ? [...details.thinkingEfforts] : [];
+}
+
+/** Per-model capabilities are the durable wire contract. `thinking_efforts` remains in enrollment
+ * responses as a legacy shared intersection, while modern clients use this mapping after switching
+ * models so a mixed-provider company catalog never exposes an invalid effort. */
+export function managedModelCapabilities(models: readonly string[]): ManagedModelCapability[] {
+  return models.map((model) => ({
+    model,
+    thinkingEfforts: managedModelThinkingEfforts(model),
+  }));
+}
+
+/** Empty means "automatic / provider default". Any explicit company default must be valid for the
+ * selected default model; accepting a generic seven-level vocabulary here would defer a predictable
+ * configuration error until an employee's first request. */
+export function resolveEnrollmentReasoningEffort(
+  requested: string | null | undefined,
+  model: string,
+): string {
+  const effort = (requested || "").trim();
+  if (!effort) return "";
+  const supported = managedModelThinkingEfforts(model);
+  if (!supported.includes(effort)) {
+    throw new Error(`model "${model}" does not support reasoning effort "${effort}"`);
+  }
+  return effort;
 }
 
 /** Capabilities that are safe to expose as one shared dial for a multi-model connection. Use the

@@ -125,12 +125,35 @@ function decodeMasterKey(raw) {
   }
 }
 
+function validateCrashAlertEnv(env) {
+  const names = [
+    "HARA_CRASH_FEISHU_APP_ID",
+    "HARA_CRASH_FEISHU_APP_SECRET",
+    "HARA_CRASH_FEISHU_CHAT_ID",
+    "HARA_CRASH_FEISHU_MENTION_OPEN_ID",
+  ];
+  const values = names.map((name) => env[name] || "");
+  if (values.every((value) => !value)) return;
+  if (values.some((value) => !value)) fail("crash alerts require all four HARA_CRASH_FEISHU_* settings");
+  if (!/^cli_[A-Za-z0-9]+$/.test(env.HARA_CRASH_FEISHU_APP_ID)) fail("HARA_CRASH_FEISHU_APP_ID is invalid");
+  if (env.HARA_CRASH_FEISHU_APP_SECRET.length < 20) fail("HARA_CRASH_FEISHU_APP_SECRET is too short");
+  if (!/^oc_[A-Za-z0-9]+$/.test(env.HARA_CRASH_FEISHU_CHAT_ID)) fail("HARA_CRASH_FEISHU_CHAT_ID is invalid");
+  if (!/^ou_[A-Za-z0-9]+$/.test(env.HARA_CRASH_FEISHU_MENTION_OPEN_ID)) fail("HARA_CRASH_FEISHU_MENTION_OPEN_ID is invalid");
+}
+
 export function validateProductionEnv(env, envPath) {
   requireDatabaseSchema(env, "DATABASE_URL", "public");
   requireValue(env, "HARA_CONTROL_ADMIN_KEY", 24);
   requireValue(env, "HARA_JWT_SECRET", 24);
   if (env.HARA_CONTROL_ADMIN_KEY === env.HARA_JWT_SECRET) {
     fail("HARA_CONTROL_ADMIN_KEY and HARA_JWT_SECRET must be different");
+  }
+  validateCrashAlertEnv(env);
+  if (
+    env.HARA_CRASH_FEISHU_APP_SECRET
+    && [env.HARA_CONTROL_ADMIN_KEY, env.HARA_JWT_SECRET].includes(env.HARA_CRASH_FEISHU_APP_SECRET)
+  ) {
+    fail("HARA_CRASH_FEISHU_APP_SECRET must be independent from Hara auth secrets");
   }
 
   if ((env.GATEWAY_ADAPTER || "mock") === "litellm") {
@@ -155,6 +178,7 @@ export function validateProductionEnv(env, envPath) {
       "HARA_JWT_SECRET",
       "LITELLM_MASTER_KEY",
       "UPSTREAM_API_KEY",
+      "HARA_CRASH_FEISHU_APP_SECRET",
     ]) {
       if (!env[name]) continue;
       const duplicate = values.get(env[name]);
@@ -184,6 +208,7 @@ export function validateProductionEnv(env, envPath) {
     "HARA_JWT_SECRET",
     "LITELLM_MASTER_KEY",
     "UPSTREAM_API_KEY",
+    "HARA_CRASH_FEISHU_APP_SECRET",
   ]) {
     if (env[name] && env[name] === masterRaw) fail(`the KMS master key must not reuse ${name}`);
   }

@@ -27,7 +27,7 @@ const rolesServiceWith = (data: {
 
 const role = (key: string, over: Record<string, unknown> = {}) => ({
   id: key, orgId: "o1", key, description: "", owns: [], rejects: [], model: null,
-  allowTools: [], denyTools: [], system: `sys ${key}`, version: 1, archivedAt: null, ...over,
+  reasoningEffort: null, allowTools: [], denyTools: [], system: `sys ${key}`, version: 1, archivedAt: null, ...over,
 });
 const assignment = (assignedRole: ReturnType<typeof role>, over: Record<string, unknown> = {}) => ({
   role: assignedRole,
@@ -106,6 +106,69 @@ test("resolveBundleForDevice: person's direct + team roles, deduped + governance
   assert.deepEqual(b.org_policy.toolDeny, ["bash", "network"]);
   assert.deepEqual(b.org_policy.modelAllow, [], "assignment-level deny-all reaches the effective bundle");
   assert.ok(b.version > 0, "non-empty bundle has a version watermark");
+});
+
+test("resolveBundleForDevice includes the company-controlled Agent reasoning override", async () => {
+  const svc = rolesServiceWith({
+    device: { id: "d1", orgId: "o1", personId: "p1", person: { orgId: "o1", teams: [] }, org: { policy: {} } },
+    assignments: [assignment(role("analyst", {
+      model: "deepseek-v4-pro",
+      reasoningEffort: "high",
+    }), { person: { orgId: "o1" } })],
+  });
+  const bundle = await svc.resolveBundleForDevice("d1");
+  assert.equal(bundle.roles[0]?.model, "deepseek-v4-pro");
+  assert.equal(bundle.roles[0]?.reasoning_effort, "high");
+});
+
+test("company Agent execution overrides are validated and updated atomically", async () => {
+  let current = role("analyst", {
+    id: "role-1",
+    model: "deepseek-v4-pro",
+    reasoningEffort: "high",
+  });
+  let createdData: Record<string, unknown> | undefined;
+  let updatedData: Record<string, unknown> | undefined;
+  const prisma = {
+    role: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        createdData = data;
+        return { ...current, ...data };
+      },
+      findUnique: async () => current,
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        updatedData = data;
+        current = { ...current, ...data, version: current.version + 1 };
+        return current;
+      },
+    },
+  } as unknown as PrismaService;
+  const audit = {
+    transact: async (
+      _action: string,
+      _actorType: string,
+      _actorId: string,
+      mutation: (tx: unknown) => Promise<{ result: unknown }>,
+    ) => (await mutation(prisma)).result,
+  } as unknown as AuditService;
+  const svc = new RolesService(prisma, audit, fakeEntitlement);
+  const actor = { id: "admin-1", role: "ADMIN", orgId: "o1", viaSharedKey: false } as never;
+
+  await svc.createRole("o1", {
+    key: "reviewer",
+    model: "deepseek-v4-flash",
+    reasoningEffort: "max",
+  }, actor);
+  assert.equal(createdData?.model, "deepseek-v4-flash");
+  assert.equal(createdData?.reasoningEffort, "max");
+
+  await assert.rejects(
+    () => svc.updateRole("role-1", { model: "custom-model" }, actor),
+    /does not support Agent reasoning effort 'high'/,
+    "changing a model cannot strand the existing effort override",
+  );
+  await svc.updateRole("role-1", { reasoningEffort: "" }, actor);
+  assert.equal(updatedData?.reasoningEffort, null, "empty clears the override and restores inheritance");
 });
 
 test("resolveBundleForDevice: archived roles excluded; no person → empty bundle", async () => {

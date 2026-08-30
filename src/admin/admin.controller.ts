@@ -66,6 +66,7 @@ export class AdminController {
       dto.personId,
       user,
       {
+        reasoningEffort: dto.reasoningEffort,
         tokenTtlMinutes: dto.tokenTtlMinutes,
         tokenNeverExpires: dto.tokenNeverExpires,
         budgetLimits: dto.budgetLimits,

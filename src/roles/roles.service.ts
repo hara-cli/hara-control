@@ -6,6 +6,10 @@ import { EntitlementService } from "../license/license.service";
 import { sha256 } from "../common/crypto";
 import { assertTokenUsable } from "../security/token-discipline";
 import type { AuthedUser } from "../common/admin-auth.guard";
+import {
+  managedModelThinkingEfforts,
+  resolveEnrollmentModel,
+} from "../providers/model-policy";
 
 /** Governance policy carried at org / team / assignment levels and merged (org < team < assignment). */
 export type Policy = {
@@ -153,10 +157,39 @@ export type RoleInput = {
   owns?: string[];
   rejects?: string[];
   model?: string | null;
+  reasoningEffort?: string | null;
   allowTools?: string[];
   denyTools?: string[];
   system?: string;
 };
+
+function normalizedRoleModel(value: string | null | undefined): string | null {
+  const model = (value || "").trim();
+  if (!model) return null;
+  try {
+    return resolveEnrollmentModel(model);
+  } catch (error) {
+    throw new BadRequestException((error as Error).message);
+  }
+}
+
+/** Validate an Agent override against its own model, never against the connection's current default.
+ * Empty/null means inherit the company connection default and is intentionally stored as null. */
+function normalizedRoleReasoningEffort(
+  value: string | null | undefined,
+  model: string | null,
+): string | null {
+  const effort = (value || "").trim();
+  if (!effort) return null;
+  if (!model) {
+    throw new BadRequestException("an Agent reasoning effort requires an explicit Agent model");
+  }
+  const supported = managedModelThinkingEfforts(model);
+  if (!supported.includes(effort)) {
+    throw new BadRequestException(`model '${model}' does not support Agent reasoning effort '${effort}'`);
+  }
+  return effort;
+}
 
 @Injectable()
 export class RolesService {
@@ -201,6 +234,8 @@ export class RolesService {
   async createRole(orgId: string, input: RoleInput, actor: AuthedUser) {
     this.entitlement.assert("agent-org"); // B3 is a licensed feature
     const auditActor = this.auditActor(actor);
+    const model = normalizedRoleModel(input.model);
+    const reasoningEffort = normalizedRoleReasoningEffort(input.reasoningEffort, model);
     return this.audit.transact("role.create", auditActor.type, auditActor.id, async (tx) => {
       const role = await tx.role.create({
         data: {
@@ -209,7 +244,8 @@ export class RolesService {
           description: input.description ?? "",
           owns: input.owns ?? [],
           rejects: input.rejects ?? [],
-          model: input.model ?? null,
+          model,
+          reasoningEffort,
           allowTools: input.allowTools ?? [],
           denyTools: input.denyTools ?? [],
           system: input.system ?? "",
@@ -224,16 +260,25 @@ export class RolesService {
   }
 
   async updateRole(id: string, input: Partial<RoleInput>, actor: AuthedUser) {
-    const data: Prisma.RoleUpdateInput = { version: { increment: 1 } };
-    if (input.description !== undefined) data.description = input.description;
-    if (input.owns !== undefined) data.owns = input.owns;
-    if (input.rejects !== undefined) data.rejects = input.rejects;
-    if (input.model !== undefined) data.model = input.model;
-    if (input.allowTools !== undefined) data.allowTools = input.allowTools;
-    if (input.denyTools !== undefined) data.denyTools = input.denyTools;
-    if (input.system !== undefined) data.system = input.system;
     const auditActor = this.auditActor(actor);
     return this.audit.transact("role.update", auditActor.type, auditActor.id, async (tx) => {
+      const current = await tx.role.findUnique({ where: { id } });
+      if (!current) throw new NotFoundException("role not found");
+      const model = input.model !== undefined
+        ? normalizedRoleModel(input.model)
+        : current.model;
+      const reasoningEffort = input.reasoningEffort !== undefined
+        ? normalizedRoleReasoningEffort(input.reasoningEffort, model)
+        : normalizedRoleReasoningEffort(current.reasoningEffort, model);
+      const data: Prisma.RoleUpdateInput = { version: { increment: 1 } };
+      if (input.description !== undefined) data.description = input.description;
+      if (input.owns !== undefined) data.owns = input.owns;
+      if (input.rejects !== undefined) data.rejects = input.rejects;
+      if (input.model !== undefined) data.model = model;
+      if (input.model !== undefined || input.reasoningEffort !== undefined) data.reasoningEffort = reasoningEffort;
+      if (input.allowTools !== undefined) data.allowTools = input.allowTools;
+      if (input.denyTools !== undefined) data.denyTools = input.denyTools;
+      if (input.system !== undefined) data.system = input.system;
       const role = await tx.role.update({ where: { id }, data });
       return {
         result: role,
@@ -458,6 +503,7 @@ export class RolesService {
         owns: r.owns,
         rejects: r.rejects,
         model: r.model ?? undefined,
+        reasoning_effort: r.reasoningEffort ?? undefined,
         allow_tools: r.allowTools,
         deny_tools: r.denyTools,
         system: r.system,
@@ -480,6 +526,7 @@ export type BundleRole = {
   owns: string[];
   rejects: string[];
   model?: string;
+  reasoning_effort?: string;
   allow_tools: string[];
   deny_tools: string[];
   system: string;

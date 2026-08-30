@@ -19,6 +19,7 @@ import { DeviceInfoDto } from "../protocol/dto";
 import {
   enrollmentManagedModels,
   managedKeyAuthorizationModels,
+  managedModelCapabilities,
   managedModelsThinkingEfforts,
   resolveEnrollmentModel,
 } from "../providers/model-policy";
@@ -128,6 +129,7 @@ export class EnrollService {
           tokenHash: sha256(issued.key),
           gatewayKeyId: issued.keyId,
           model: resolvedModel,
+          reasoningEffort: ec.reasoningEffort,
           expiresAt: issued.expiresAt,
           budgetLimits: accessPolicy.budgetLimits as unknown as Prisma.InputJsonValue,
           rpmLimit: accessPolicy.rpmLimit,
@@ -163,7 +165,12 @@ export class EnrollService {
           .slice(0, 80) || organization.id,
         model: resolvedModel,
         available_models: availableModels,
+        model_capabilities: managedModelCapabilities(availableModels).map((capability) => ({
+          model: capability.model,
+          thinking_efforts: capability.thinkingEfforts,
+        })),
         thinking_efforts: managedModelsThinkingEfforts(availableModels),
+        default_reasoning_effort: ec.reasoningEffort || null,
         base_url: ec.baseUrl ?? undefined,
         expires_at: issued.expiresAt?.toISOString() ?? null,
         access_policy: accessPolicy,
@@ -254,7 +261,12 @@ export class EnrollService {
     return {
       model: resolvedModel,
       available_models: availableModels,
+      model_capabilities: managedModelCapabilities(availableModels).map((capability) => ({
+        model: capability.model,
+        thinking_efforts: capability.thinkingEfforts,
+      })),
       thinking_efforts: managedModelsThinkingEfforts(availableModels),
+      default_reasoning_effort: dt!.reasoningEffort || null,
       expires_at: dt!.expiresAt?.toISOString(),
     };
   }

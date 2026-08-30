@@ -119,6 +119,22 @@ test("production wrapper rejects a LiteLLM database URL that can touch the contr
   });
 });
 
+test("production wrapper rejects a partial crash alert configuration", () => {
+  withTemp((dir) => {
+    const envFile = validEnv(dir);
+    writeFileSync(
+      envFile,
+      `${readFileSync(envFile, "utf8")}\nHARA_CRASH_FEISHU_APP_ID=cli_valid123\n`,
+      { mode: 0o600 },
+    );
+    const result = spawnSync(process.execPath, [script, envFile, "--", process.execPath, "-e", ""], {
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /all four/);
+  });
+});
+
 test("production deploy replaces the canonical existing LiteLLM PM2 process", () => {
   const source = readFileSync(deployScript, "utf8");
   assert.match(

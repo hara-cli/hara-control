@@ -7,6 +7,7 @@ export class CreateRoleDto {
   @IsArray() @IsString({ each: true }) @IsOptional() owns?: string[];
   @IsArray() @IsString({ each: true }) @IsOptional() rejects?: string[];
   @IsString() @IsOptional() model?: string;
+  @IsString() @IsOptional() reasoningEffort?: string;
   @IsArray() @IsString({ each: true }) @IsOptional() allowTools?: string[];
   @IsArray() @IsString({ each: true }) @IsOptional() denyTools?: string[];
   @IsString() @IsOptional() system?: string;
@@ -17,6 +18,7 @@ export class UpdateRoleDto {
   @IsArray() @IsString({ each: true }) @IsOptional() owns?: string[];
   @IsArray() @IsString({ each: true }) @IsOptional() rejects?: string[];
   @IsString() @IsOptional() model?: string;
+  @IsString() @IsOptional() reasoningEffort?: string;
   @IsArray() @IsString({ each: true }) @IsOptional() allowTools?: string[];
   @IsArray() @IsString({ each: true }) @IsOptional() denyTools?: string[];
   @IsString() @IsOptional() system?: string;

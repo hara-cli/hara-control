@@ -3,7 +3,7 @@
  *
  * Single-page console. No framework, no build. Responsibilities:
  *   1. i18n engine  — three dicts loaded as window.HARA_I18N.{en,zh-CN,zh-TW}.
- *   2. Hash router  — eight views (overview/orgs/fleet/usage/learnings/enroll/users/security).
+ *   2. Hash router  — product and fleet administration views.
  *   3. Auth flow    — email+password → optional TOTP code → JWT (8h).
  *   4. API client   — every endpoint from _legacy_index.html, contract-identical.
  *   5. QR codes     — window.HaraQR.toSvg() called for the 2FA enrollment view.
@@ -297,6 +297,7 @@
       // SUPERADMIN gets the Users nav item; others don't even see it
       if (me.role === "SUPERADMIN") {
         $("#nav-users").classList.remove("hidden");
+        $("#nav-crashes").classList.remove("hidden");
         $("#ec-never-expires-wrap").classList.remove("hidden");
       } else {
         $("#nav-users").classList.add("hidden");
@@ -365,7 +366,7 @@
   // ║ 7.  hash router                                                   ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   const router = (() => {
-    const ROUTES = ["overview", "orgs", "fleet", "usage", "learnings", "enroll", "users", "security"];
+    const ROUTES = ["overview", "orgs", "fleet", "usage", "learnings", "crashes", "enroll", "users", "security"];
     const handlers = {};   // optional onEnter hooks per view
 
     let last = null;
@@ -385,8 +386,8 @@
 
     function dispatch() {
       const name = current();
-      // Authorize: Users tab is SUPERADMIN-only. Sneaky URLs land on overview.
-      if (name === "users" && (!me || me.role !== "SUPERADMIN")) {
+      // Authorize global operator views in both navigation and direct hash URLs.
+      if (["users", "crashes"].includes(name) && (!me || me.role !== "SUPERADMIN")) {
         navigate("overview");
         return;
       }
@@ -419,6 +420,7 @@
     if (r === "fleet" && lastFleetRows) renderFleet();
     if (r === "usage" && lastUsageReport) renderUsage(lastUsageReport);
     if (r === "learnings" && lastLearningRows) renderLearnings(lastLearningRows);
+    if (r === "crashes" && lastCrashRows) renderCrashReports(lastCrashRows);
     if (r === "users") loadUsers();
     if (r === "orgs") {
       if (lastInspectId) inspectOrg(lastInspectId);
@@ -1017,7 +1019,103 @@
   });
 
   // ╔═══════════════════════════════════════════════════════════════════╗
-  // ║ 12.  Usage + quota flight recorder                                ║
+  // ║ 12.  User-consented Desktop crash reports (SUPERADMIN)           ║
+  // ╚═══════════════════════════════════════════════════════════════════╝
+  let lastCrashRows = null;
+  let crashRequestId = 0;
+
+  router.on("crashes", loadCrashReports);
+  $("#crash-refresh").addEventListener("click", loadCrashReports);
+  $("#crash-status").addEventListener("change", loadCrashReports);
+
+  async function loadCrashReports() {
+    if (!me || me.role !== "SUPERADMIN") return;
+    const requestId = ++crashRequestId;
+    const refresh = $("#crash-refresh");
+    const status = $("#crash-status").value;
+    refresh.disabled = true;
+    $("#crash-body").innerHTML = `<tr><td colspan="5" class="text-soft">${escapeHtml(I18N.t("common.loading"))}</td></tr>`;
+    try {
+      const query = new URLSearchParams({ limit: "200" });
+      if (status) query.set("status", status);
+      const rows = await api("GET", `/admin/crash-reports?${query}`);
+      if (requestId !== crashRequestId) return;
+      lastCrashRows = Array.isArray(rows) ? rows : [];
+      renderCrashReports(lastCrashRows);
+    } catch (error) {
+      if (requestId !== crashRequestId) return;
+      lastCrashRows = null;
+      $("#crash-count").textContent = "—";
+      $("#crash-body").innerHTML = `<tr><td colspan="5" class="text-soft">${escapeHtml(error.message)}</td></tr>`;
+      toast(error.message, "err");
+    } finally {
+      if (requestId === crashRequestId) refresh.disabled = false;
+    }
+  }
+
+  function crashStatusOptions(active) {
+    return ["NEW", "REVIEWING", "RESOLVED", "IGNORED"].map((status) =>
+      `<option value="${status}"${status === active ? " selected" : ""}>${escapeHtml(I18N.t(`crashes.status.${status}`))}</option>`
+    ).join("");
+  }
+
+  function renderCrashReports(rows) {
+    $("#crash-count").textContent = I18N.t("crashes.count", { n: rows.length });
+    const body = $("#crash-body");
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="5" class="text-soft">${escapeHtml(I18N.t("crashes.empty"))}</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map((row) => {
+      const context = Array.isArray(row.context) ? row.context.filter((item) => typeof item === "string") : [];
+      const note = row.reviewNote || "";
+      const fingerprint = typeof row.fingerprint === "string" ? row.fingerprint : "";
+      return `<tr data-crash-row="${escapeHtml(row.id)}">
+        <td class="mono">${escapeHtml(formatDateTime(row.lastOccurredAt))}<br><span class="text-soft">${escapeHtml(truncateMid(row.id, 10, 4))}</span></td>
+        <td class="crash-issue">
+          <strong>${escapeHtml(row.summary || I18N.t(`crashes.kind.${row.kind}`))}</strong>
+          ${row.userDescription ? `<p>${escapeHtml(row.userDescription)}</p>` : ""}
+          <small>${escapeHtml(I18N.t(`crashes.kind.${row.kind}`))}${context.length ? ` · ${escapeHtml(context.join(" · "))}` : ""}<br>${escapeHtml(fingerprint)}</small>
+        </td>
+        <td class="crash-runtime">Desktop ${escapeHtml(row.appVersion || "—")}<br>Engine ${escapeHtml(row.engineVersion || "—")}<br>${escapeHtml(row.platform || "—")} · ${escapeHtml(row.arch || "—")}<br><span class="crash-alert crash-alert--${escapeHtml(row.alertState || "PENDING")}">${escapeHtml(I18N.t("crashes.alert.label"))} · ${escapeHtml(I18N.t(`crashes.alert.${row.alertState || "PENDING"}`))}</span>${row.alertLastError ? `<br><span class="crash-alert-error">${escapeHtml(row.alertLastError)}</span>` : ""}</td>
+        <td class="num">${escapeHtml(formatCount(row.occurrenceCount))}</td>
+        <td><div class="crash-review">
+          <select class="select" data-crash-status>${crashStatusOptions(row.status)}</select>
+          <textarea class="input" maxlength="1000" data-crash-note placeholder="${escapeHtml(I18N.t("crashes.note.placeholder"))}">${escapeHtml(note)}</textarea>
+          ${row.reviewedBy ? `<small class="text-soft">${escapeHtml(row.reviewedBy)} · ${escapeHtml(formatDateTime(row.reviewedAt))}</small>` : ""}
+          ${row.alertState === "FAILED" ? `<button type="button" class="btn-ghost" data-crash-retry>${escapeHtml(I18N.t("crashes.alert.retry"))}</button>` : ""}
+          <button type="button" class="btn-ghost" data-crash-save>${escapeHtml(I18N.t("common.save"))}</button>
+        </div></td>
+      </tr>`;
+    }).join("");
+  }
+
+  $("#crash-body").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-crash-save], button[data-crash-retry]");
+    if (!button) return;
+    const row = button.closest("tr[data-crash-row]");
+    const id = row && row.getAttribute("data-crash-row");
+    if (!row || !id) return;
+    button.disabled = true;
+    try {
+      if (button.hasAttribute("data-crash-retry")) {
+        await api("POST", `/admin/crash-reports/${encodeURIComponent(id)}/retry-alert`);
+        toast(I18N.t("crashes.alert.retried"), "ok");
+      } else {
+        const status = row.querySelector("[data-crash-status]").value;
+        const note = row.querySelector("[data-crash-note]").value.trim();
+        await api("PATCH", `/admin/crash-reports/${encodeURIComponent(id)}`, { status, note });
+        toast(I18N.t("crashes.saved"), "ok");
+      }
+      await loadCrashReports();
+    } catch (error) {
+      toast(error.message, "err");
+      button.disabled = false;
+    }
+  });
+
+  // ╔═══════════════════════════════════════════════════════════════════╗
+  // ║ 13.  Usage + quota flight recorder                                ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   let usageRange = "24h";
   let lastUsageReport = null;
@@ -1237,6 +1335,25 @@
       : model.id;
   }
 
+  function effortOptionLabel(effort) {
+    const localized = I18N.t(`enroll.effort.${effort}`);
+    return localized.startsWith("enroll.effort.") ? effort : localized;
+  }
+
+  function paintManagedEfforts(model) {
+    const wrap = $("#ec-effort-wrap");
+    const select = $("#ec-effort");
+    const previous = select.value;
+    const efforts = Array.isArray(model?.thinkingEfforts) ? model.thinkingEfforts : [];
+    select.innerHTML = [
+      `<option value="">${escapeHtml(I18N.t("enroll.effort.auto"))}</option>`,
+      ...efforts.map((effort) => `<option value="${escapeHtml(effort)}">${escapeHtml(effortOptionLabel(effort))}</option>`),
+    ].join("");
+    select.value = efforts.includes(previous) ? previous : "";
+    select.disabled = efforts.length === 0;
+    wrap.classList.toggle("hidden", efforts.length === 0);
+  }
+
   function paintManagedModelCatalog() {
     if (!managedModelCatalog) return;
     const select = $("#ec-model");
@@ -1257,6 +1374,7 @@
       ? modelOptionDetail(active)
       : I18N.t("enroll.model.unavailable");
     $("#ec-create").disabled = !active;
+    paintManagedEfforts(active);
   }
 
   async function loadManagedModelCatalog(force = false) {
@@ -1353,6 +1471,7 @@
   $("#ec-create").addEventListener("click", async () => {
     const orgId = $("#ec-orgid").value.trim();
     const model = $("#ec-model").value.trim();
+    const reasoningEffort = $("#ec-effort").value.trim();
     const gateway = $("#ec-gateway").value.trim().replace(/\/$/, "");
     if (!orgId) { toast(I18N.t("err.orgid_required"), "err"); return; }
     if (!model) { toast(I18N.t("err.model_required"), "err"); return; }
@@ -1374,6 +1493,7 @@
       const r = await api("POST", "/admin/enroll-codes", {
         orgId,
         model,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(tokenNeverExpires
           ? { tokenNeverExpires: true }
           : { tokenTtlMinutes: tokenDays * 24 * 60 }),
@@ -1384,6 +1504,7 @@
       lastEnrollResult = {
         code: r.code,
         model: r.model || model,
+        reasoningEffort: r.reasoningEffort || reasoningEffort,
         models: Array.isArray(r.models) ? r.models : [r.model || model].filter(Boolean),
         gateway,
         expiresAt: r.expiresAt,
@@ -1394,13 +1515,16 @@
     } catch (e) { toast(e.message, "err"); }
   });
 
-  function paintEnrollResult({ code, model, models, gateway, expiresAt, accessPolicy }) {
+  function paintEnrollResult({ code, model, models, reasoningEffort, gateway, expiresAt, accessPolicy }) {
     $("#ec-code-text").textContent = code;
     $("#ec-cmd-text").textContent = `hara enroll ${gateway} --code ${code}`;
     $("#ec-expires").textContent = formatDateTime(expiresAt);
     $("#ec-result-model").textContent = Array.isArray(models) && models.length
       ? models.join(" · ")
       : model || "—";
+    $("#ec-result-effort").textContent = reasoningEffort
+      ? effortOptionLabel(reasoningEffort)
+      : I18N.t("enroll.effort.auto");
     $("#ec-policy-result").textContent = formatAccessPolicy(accessPolicy);
     $("#ec-result").classList.remove("hidden");
   }

@@ -27,6 +27,11 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
     "enroll.model.detail.flash",
     "enroll.model.detail.pro",
     "enroll.model.detail.vision",
+    "enroll.effort",
+    "enroll.effort.auto",
+    "enroll.effort.hint",
+    "enroll.effort.max",
+    "enroll.result.effort",
     "enroll.policy.token_days",
     "enroll.policy.never_expires",
     "enroll.policy.never_expires.hint",
@@ -52,6 +57,8 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
     "ec-never-expires-wrap",
     "ec-model",
     "ec-model-hint",
+    "ec-effort-wrap",
+    "ec-effort",
     "ec-budget-5h",
     "ec-budget-week",
     "ec-budget-month",
@@ -59,6 +66,7 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
     "ec-tpm",
     "ec-policy-result",
     "ec-result-model",
+    "ec-result-effort",
   ]) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
@@ -69,7 +77,7 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
 test("console JavaScript parses and sends the enforced policy fields to the enroll endpoint", () => {
   const app = readFileSync(join(root, "public", "console", "app.js"), "utf8");
   assert.doesNotThrow(() => new Function(app));
-  for (const field of ["tokenTtlMinutes", "tokenNeverExpires", "budgetLimits", "rpmLimit", "tpmLimit"]) {
+  for (const field of ["reasoningEffort", "tokenTtlMinutes", "tokenNeverExpires", "budgetLimits", "rpmLimit", "tpmLimit"]) {
     assert.match(app, new RegExp(`\\b${field}\\b`));
   }
   assert.match(app, /\/admin\/enroll-codes/);

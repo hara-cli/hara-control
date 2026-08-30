@@ -8,6 +8,7 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -67,6 +68,8 @@ export class AccessBudgetLimitDto {
 export class CreateEnrollCodeDto {
   @IsString() @IsNotEmpty() orgId!: string;
   @IsString() @IsOptional() model?: string;
+  @IsString() @IsIn(["off", "minimal", "low", "medium", "high", "xhigh", "max"])
+  @IsOptional() reasoningEffort?: string;
   @IsString() @IsOptional() baseUrl?: string;
   @IsInt() @Min(1) @IsOptional() ttlMinutes?: number;
   @IsInt() @Min(MIN_TOKEN_TTL_MINUTES) @Max(MAX_TOKEN_TTL_MINUTES) @IsOptional() tokenTtlMinutes?: number;

@@ -43,6 +43,28 @@ test("production runtime rejects deploy-script bypass and reused signing/admin s
   );
 });
 
+test("production runtime requires a complete, independent crash alert configuration", () => {
+  assert.throws(
+    () => assertProductionRuntime({ ...valid, HARA_CRASH_FEISHU_APP_ID: "cli_valid123" }),
+    /all four/,
+  );
+  const alertEnv = {
+    ...valid,
+    HARA_CRASH_FEISHU_APP_ID: "cli_valid123",
+    HARA_CRASH_FEISHU_APP_SECRET: "f".repeat(32),
+    HARA_CRASH_FEISHU_CHAT_ID: "oc_17590648f393135cde6a6b9cd6f1c710",
+    HARA_CRASH_FEISHU_MENTION_OPEN_ID: "ou_32b2bd011e81f02315e58c707949fbb5",
+  };
+  assert.doesNotThrow(() => assertProductionRuntime(alertEnv));
+  assert.throws(
+    () => assertProductionRuntime({
+      ...alertEnv,
+      HARA_CRASH_FEISHU_APP_SECRET: valid.HARA_JWT_SECRET,
+    }),
+    /independent/,
+  );
+});
+
 test("development/test runtime remains zero-config", () => {
   assert.doesNotThrow(() => assertProductionRuntime({ NODE_ENV: "test" }));
 });

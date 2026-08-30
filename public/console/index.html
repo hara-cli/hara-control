@@ -98,6 +98,12 @@
         </span>
         <span data-i18n="nav.learnings">Learning</span>
       </a>
+      <a class="sidebar__item hidden" id="nav-crashes" href="#/crashes" data-route="crashes">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h8M9 2v3m6-3v3M6 9H3m18 0h-3M6 15H3m18 0h-3"/><rect x="6" y="5" width="12" height="16" rx="6"/><path d="M9 11h6M9 15h6"/></svg>
+        </span>
+        <span data-i18n="nav.crashes">Crash reports</span>
+      </a>
       <a class="sidebar__item" href="#/enroll" data-route="enroll">
         <span class="sidebar__item-icon" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3"/><path d="M9 3h6v8H9z"/></svg>
@@ -502,6 +508,46 @@
       </div>
     </section>
 
+    <!-- CRASH REPORTS · SUPERADMIN ONLY -->
+    <section class="view hidden" id="view-crashes" data-view="crashes">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.crashes">Crash reports</h1>
+          <p class="view__subtitle" data-i18n="crashes.hint">User-approved Desktop diagnostics only. Matching failures are merged and automatically expire after 90 days.</p>
+        </div>
+        <button type="button" class="btn-ghost" id="crash-refresh" data-i18n="crashes.refresh">Refresh</button>
+      </div>
+
+      <div class="crash-privacy-note" role="note">
+        <strong data-i18n="crashes.privacy.title">Privacy boundary</strong>
+        <span data-i18n="crashes.privacy.body">No chats, file contents, credentials, cookies, full local paths, or provider payloads are collected.</span>
+      </div>
+
+      <div class="filter-bar">
+        <label class="field__label" for="crash-status" data-i18n="crashes.filter">Status</label>
+        <select class="select" id="crash-status">
+          <option value="" data-i18n="crashes.status.ALL">All</option>
+          <option value="NEW" data-i18n="crashes.status.NEW">New</option>
+          <option value="REVIEWING" data-i18n="crashes.status.REVIEWING">Reviewing</option>
+          <option value="RESOLVED" data-i18n="crashes.status.RESOLVED">Resolved</option>
+          <option value="IGNORED" data-i18n="crashes.status.IGNORED">Ignored</option>
+        </select>
+        <span class="text-soft" id="crash-count">—</span>
+      </div>
+      <div class="table-wrap">
+        <table class="table crash-table">
+          <thead><tr>
+            <th data-i18n="crashes.col.last">Last seen</th>
+            <th data-i18n="crashes.col.issue">Issue</th>
+            <th data-i18n="crashes.col.runtime">Runtime</th>
+            <th class="num" data-i18n="crashes.col.count">Count</th>
+            <th data-i18n="crashes.col.review">Review</th>
+          </tr></thead>
+          <tbody id="crash-body"><tr><td colspan="5" class="text-soft" data-i18n="common.loading">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- ENROLL -->
     <section class="view hidden" id="view-enroll" data-view="enroll">
       <div class="view__header">
@@ -524,6 +570,13 @@
                 <option value="" data-i18n="enroll.model.loading">Loading available models…</option>
               </select>
               <div class="field__hint" id="ec-model-hint" data-i18n="enroll.model.hint">The same managed connection can switch among every authorized model; this only chooses its default.</div>
+            </div>
+            <div class="field hidden" id="ec-effort-wrap">
+              <label class="field__label" for="ec-effort" data-i18n="enroll.effort">Default reasoning effort</label>
+              <select class="select" id="ec-effort">
+                <option value="" data-i18n="enroll.effort.auto">Automatic · use the model default</option>
+              </select>
+              <div class="field__hint" data-i18n="enroll.effort.hint">New chats, tasks, and inheriting Agents use this default. A conversation or Agent may override it.</div>
             </div>
             <div class="field">
               <label class="field__label" for="ec-gateway" data-i18n="enroll.gateway">Gateway URL</label>
@@ -615,6 +668,10 @@
             <div class="field">
               <label class="field__label" data-i18n="enroll.result.model">Authorized models</label>
               <div class="mono small" id="ec-result-model"></div>
+            </div>
+            <div class="field">
+              <label class="field__label" data-i18n="enroll.result.effort">Default reasoning effort</label>
+              <div class="mono small" id="ec-result-effort"></div>
             </div>
             <div class="field">
               <label class="field__label" data-i18n="enroll.result.policy">Issued key policy</label>

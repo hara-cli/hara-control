@@ -12,6 +12,10 @@ const FORBIDDEN_ENV_NAMES = new Set([
   "HARA_KMS_KEYFILE",
   "LITELLM_MASTER_KEY",
   "UPSTREAM_API_KEY",
+  "HARA_CRASH_FEISHU_APP_ID",
+  "HARA_CRASH_FEISHU_APP_SECRET",
+  "HARA_CRASH_FEISHU_CHAT_ID",
+  "HARA_CRASH_FEISHU_MENTION_OPEN_ID",
 ]);
 
 export function unsafePm2Environment(processes, expectedNames) {

@@ -1030,6 +1030,40 @@ tr:hover .row-actions { opacity: 1; }
   border-radius: 0 0 var(--r-card) var(--r-card);
   border-top: 0;
 }
+
+/* User-consented Desktop crash intake — operator-only and deliberately compact. */
+.crash-privacy-note {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--success) 36%, var(--border));
+  border-radius: var(--r-card);
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--success) 7%, var(--panel));
+  font-size: 12px;
+}
+.crash-privacy-note strong { flex: 0 0 auto; color: var(--success); }
+.crash-table td { vertical-align: top; }
+.crash-table .select { min-width: 112px; padding: 6px 28px 6px 9px; font-size: 12px; }
+.crash-issue { min-width: 260px; max-width: 520px; }
+.crash-issue strong { display: block; color: var(--text); }
+.crash-issue p { margin: 5px 0 0; color: var(--text-soft); line-height: 1.45; white-space: pre-wrap; }
+.crash-issue small { display: block; margin-top: 6px; color: var(--muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.crash-runtime { min-width: 150px; color: var(--text-soft); font-family: var(--font-mono); font-size: 11px; line-height: 1.6; }
+.crash-alert { display: inline-block; margin-top: 5px; color: var(--muted); }
+.crash-alert--SENT { color: var(--success); }
+.crash-alert--FAILED { color: var(--danger); }
+.crash-alert--SENDING { color: var(--accent); }
+.crash-alert-error { display: inline-block; max-width: 220px; color: var(--danger); overflow-wrap: anywhere; }
+.crash-review { display: grid; gap: 7px; min-width: 190px; }
+.crash-review textarea { min-height: 52px; resize: vertical; padding: 7px 9px; font-size: 12px; }
+.crash-review .btn-ghost { justify-self: end; padding: 6px 10px; }
+
+@media (max-width: 980px) {
+  .crash-table { min-width: 920px; }
+  .crash-privacy-note { flex-direction: column; gap: 3px; }
+}
 .filter-bar__check {
   display: inline-flex;
   align-items: center;

@@ -16,6 +16,7 @@ type Code = {
   orgId: string;
   code: string;
   model: string;
+  reasoningEffort?: string;
   baseUrl: string | null;
   expiresAt: Date;
   usedAt: Date | null;
@@ -33,6 +34,7 @@ type Tok = {
   tokenHash: string;
   gatewayKeyId: string;
   model: string;
+  reasoningEffort?: string;
   expiresAt: Date | null;
   revokedAt: Date | null;
   budgetLimits?: unknown;
@@ -163,6 +165,8 @@ test("enroll: valid code -> device token; code is single-use", async () => {
   assert.equal(res.model, "glm-5");
   assert.deepEqual(res.available_models, ["glm-5"]);
   assert.deepEqual(res.thinking_efforts, []);
+  assert.deepEqual(res.model_capabilities, [{ model: "glm-5", thinking_efforts: [] }]);
+  assert.equal(res.default_reasoning_effort, null);
   assert.equal(res.tenant_id, "o1");
   assert.equal(res.tenant_name, "Organization o1");
   assert.ok(res.device_id, "returned a device id");
@@ -366,6 +370,7 @@ test("enroll: applies and persists the admin-issued lifetime, rolling budgets, R
     orgId: "o1",
     code: "hara-limited",
     model: "deepseek-chat",
+    reasoningEffort: "high",
     baseUrl: null,
     expiresAt: new Date("2026-07-22T01:00:00Z"),
     usedAt: null,
@@ -409,6 +414,8 @@ test("enroll: applies and persists the admin-issued lifetime, rolling budgets, R
   assert.equal(result.expires_at, "2026-07-24T00:00:00.000Z");
   assert.deepEqual(result.available_models, ["deepseek-chat"]);
   assert.deepEqual(result.thinking_efforts, ["off", "low", "high", "max"]);
+  assert.equal(result.default_reasoning_effort, "high");
+  assert.equal(prisma.db.tokens[0].reasoningEffort, "high");
   assert.equal(result.access_policy.tokenTtlMinutes, 2 * 24 * 60);
   assert.equal(prisma.db.tokens[0].rpmLimit, 30);
   assert.equal(prisma.db.tokens[0].tpmLimit, 120_000);
@@ -477,6 +484,7 @@ test("formal managed enrollment and heartbeat expose all three models on the sam
       orgId: "o1",
       code: "hara-multi",
       model: "deepseek-chat",
+      reasoningEffort: "max",
       baseUrl: null,
       expiresAt: new Date(Date.now() + 60_000),
       usedAt: null,
@@ -510,6 +518,12 @@ test("formal managed enrollment and heartbeat expose all three models on the sam
       "deepseek-v4-pro",
       "deepseek-v4-flash-vision-exp",
     ]);
+    assert.equal(enrolled.default_reasoning_effort, "max");
+    assert.deepEqual(enrolled.model_capabilities, [
+      { model: "deepseek-v4-flash", thinking_efforts: ["off", "low", "high", "max"] },
+      { model: "deepseek-v4-pro", thinking_efforts: ["off", "low", "high", "max"] },
+      { model: "deepseek-v4-flash-vision-exp", thinking_efforts: ["off", "low", "high", "max"] },
+    ]);
     assert.deepEqual(issued!.models, [
       "deepseek-v4-flash",
       "deepseek-v4-pro",
@@ -528,6 +542,7 @@ test("formal managed enrollment and heartbeat expose all three models on the sam
       "deepseek-v4-pro",
       "deepseek-v4-flash-vision-exp",
     ]);
+    assert.equal(heartbeat.default_reasoning_effort, "max");
     assert.equal(enrolled.device_token, originalDeviceToken, "the user-facing key is not rotated");
     assert.deepEqual(synchronized, [{
       keyId: enrolled.device_id,

@@ -8,6 +8,7 @@ import { randomId } from "../common/crypto";
 import {
   enrollmentManagedModels,
   resolveEnrollmentModel,
+  resolveEnrollmentReasoningEffort,
 } from "../providers/model-policy";
 import { deviceTokenTtlMinutes } from "../security/token-discipline";
 import {
@@ -113,15 +114,17 @@ export class AdminService {
     ttlMinutes: number,
     personId: string | undefined,
     actor: AuthedUser,
-    keyPolicy: AccessKeyPolicyInput = {},
+    options: AccessKeyPolicyInput & { reasoningEffort?: string } = {},
     now = new Date(),
   ) {
     if (!actor?.id) throw new BadRequestException("authenticated audit actor is required");
     let resolvedModel: string;
+    let reasoningEffort: string;
     let accessPolicy: StoredAccessKeyPolicy;
     try {
       resolvedModel = resolveEnrollmentModel(model);
-      accessPolicy = normalizeAccessKeyPolicy(keyPolicy, deviceTokenTtlMinutes());
+      reasoningEffort = resolveEnrollmentReasoningEffort(options.reasoningEffort, resolvedModel);
+      accessPolicy = normalizeAccessKeyPolicy(options, deviceTokenTtlMinutes());
     } catch (error) {
       throw new BadRequestException((error as Error).message);
     }
@@ -146,6 +149,7 @@ export class AdminService {
             orgId,
             code: randomId("hara-", 9),
             model: resolvedModel,
+            reasoningEffort,
             baseUrl: baseUrl ?? null,
             personId: personId ?? null,
             expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
@@ -160,12 +164,13 @@ export class AdminService {
           result: {
             code: ec.code,
             model: resolvedModel,
+            reasoningEffort,
             models,
             expiresAt: ec.expiresAt,
             accessPolicy,
           },
           orgId,
-          payload: { model: resolvedModel, models, ttlMinutes, personId, accessPolicy },
+          payload: { model: resolvedModel, reasoningEffort, models, ttlMinutes, personId, accessPolicy },
         };
       },
     );
@@ -194,6 +199,7 @@ export class AdminService {
         online: now.getTime() - d.lastSeenAt.getTime() < ONLINE_WINDOW_MS,
         token_active: Boolean(active),
         model: active?.model ?? "",
+        reasoning_effort: active?.reasoningEffort || null,
         available_models: active ? enrollmentManagedModels(active.model) : [],
         spend: active ? (spend.get(active.gatewayKeyId) ?? null) : null,
         spend_available: active ? spend.get(active.gatewayKeyId) != null : false,

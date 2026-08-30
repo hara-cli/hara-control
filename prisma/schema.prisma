@@ -159,6 +159,7 @@ model EnrollCode {
   orgId     String
   code      String    @unique
   model     String    @default("") // model alias the gateway routes this device to
+  reasoningEffort String @default("") // empty = provider/model default; otherwise server-approved effort
   baseUrl   String?               // explicit OpenAI-compatible base; else <gateway>/v1
   expiresAt DateTime
   usedAt    DateTime?             // single-use: set when redeemed
@@ -270,6 +271,7 @@ model DeviceToken {
   tokenHash    String    @unique // sha256 of the issued token
   gatewayKeyId String              // id returned by the gateway adapter, used to revoke
   model        String    @default("")
+  reasoningEffort String @default("") // copied from EnrollCode; refreshed to clients by heartbeat
   createdAt    DateTime  @default(now())
   expiresAt    DateTime?           // short-TTL discipline: tokens expire and must be re-enrolled
   revokedAt    DateTime?
@@ -367,6 +369,7 @@ model Role {
   owns        String[]     @default([]) // routing OWN keywords
   rejects     String[]     @default([]) // routing REJECT keywords
   model       String? // optional model override (subject to org/team model allow-list)
+  reasoningEffort String? // optional per-Agent override; null follows the company connection default
   allowTools  String[]     @default([])
   denyTools   String[]     @default([])
   system      String       @default("") // persona/system body (markdown)
@@ -380,6 +383,59 @@ model Role {
   @@unique([orgId, key])
   @@unique([id, orgId])
   @@index([orgId])
+}
+
+enum DesktopCrashReportStatus {
+  NEW
+  REVIEWING
+  RESOLVED
+  IGNORED
+}
+
+/// Durable delivery state for the sanitized Feishu alert. The report row itself is the transactional
+/// outbox: report persistence and the decision to notify cannot diverge.
+enum DesktopCrashAlertState {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+}
+
+/// User-consented, strictly allow-listed Desktop diagnostics. Raw transcripts, file contents, local paths,
+/// provider payloads and credentials are forbidden by the public DTO and never have columns here.
+model DesktopCrashReport {
+  id                 String                   @id @default(uuid())
+  status             DesktopCrashReportStatus @default(NEW)
+  alertState         DesktopCrashAlertState   @default(PENDING)
+  alertGeneration    Int                      @default(1)
+  alertAttempts      Int                      @default(0)
+  alertNextAttemptAt DateTime                 @default(now())
+  alertClaimedAt     DateTime?
+  alertDeliveredAt   DateTime?
+  alertLastError     String                   @default("") @db.VarChar(300)
+  reportVersion      Int
+  consentVersion     Int
+  appVersion         String                   @db.VarChar(48)
+  engineVersion      String                   @default("") @db.VarChar(48)
+  platform           String                   @db.VarChar(24)
+  arch               String                   @db.VarChar(24)
+  kind               String                   @db.VarChar(40)
+  fingerprint        String                   @db.Char(64)
+  summary            String                   @db.VarChar(500)
+  userDescription    String                   @default("") @db.VarChar(1200)
+  context            Json                     @default("[]")
+  occurrenceCount    Int                      @default(1)
+  lastOccurredAt     DateTime
+  reviewNote         String                   @default("") @db.VarChar(1000)
+  reviewedBy         String                   @default("") @db.VarChar(160)
+  reviewedAt         DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@unique([fingerprint, appVersion, platform, arch, kind], map: "DesktopCrashReport_dedupe_key")
+  @@index([status, lastOccurredAt])
+  @@index([alertState, alertNextAttemptAt])
+  @@index([lastOccurredAt])
 }
 
 model Team {

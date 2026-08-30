@@ -6,10 +6,12 @@ import {
   defaultManagedModel,
   enrollmentManagedModels,
   managedKeyAuthorizationModels,
+  managedModelCapabilities,
   managedModelOptions,
   managedModelThinkingEfforts,
   managedModelsThinkingEfforts,
   resolveEnrollmentModel,
+  resolveEnrollmentReasoningEffort,
 } from "../src/providers/model-policy";
 
 test("formal enrollment defaults to canonical DeepSeek V4 models with discoverable capabilities", () => {
@@ -24,6 +26,16 @@ test("formal enrollment defaults to canonical DeepSeek V4 models with discoverab
   assert.deepEqual(
     enrollmentManagedModels("deepseek-v4-flash", env),
     ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+  );
+  assert.deepEqual(managedModelCapabilities(["deepseek-v4-flash", "deepseek-v4-pro"]), [
+    { model: "deepseek-v4-flash", thinkingEfforts: ["off", "low", "high", "max"] },
+    { model: "deepseek-v4-pro", thinkingEfforts: ["off", "low", "high", "max"] },
+  ]);
+  assert.equal(resolveEnrollmentReasoningEffort(undefined, "deepseek-v4-flash"), "");
+  assert.equal(resolveEnrollmentReasoningEffort("high", "deepseek-v4-flash"), "high");
+  assert.throws(
+    () => resolveEnrollmentReasoningEffort("medium", "deepseek-v4-flash"),
+    /does not support reasoning effort/,
   );
   assert.deepEqual(managedModelThinkingEfforts("deepseek-v4-flash"), ["off", "low", "high", "max"]);
   assert.deepEqual(managedModelThinkingEfforts("deepseek-pro"), ["off", "low", "high", "max"]);

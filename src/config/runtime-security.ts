@@ -34,6 +34,32 @@ function requireDatabaseSchema(
   }
 }
 
+function assertCrashAlertConfiguration(env: NodeJS.ProcessEnv): void {
+  const names = [
+    "HARA_CRASH_FEISHU_APP_ID",
+    "HARA_CRASH_FEISHU_APP_SECRET",
+    "HARA_CRASH_FEISHU_CHAT_ID",
+    "HARA_CRASH_FEISHU_MENTION_OPEN_ID",
+  ] as const;
+  const values = names.map((name) => env[name] || "");
+  if (values.every((value) => !value)) return;
+  if (values.some((value) => !value)) {
+    throw new Error("production crash alerts require all four HARA_CRASH_FEISHU_* settings");
+  }
+  if (!/^cli_[A-Za-z0-9]+$/u.test(env.HARA_CRASH_FEISHU_APP_ID!)) {
+    throw new Error("production HARA_CRASH_FEISHU_APP_ID is invalid");
+  }
+  if (env.HARA_CRASH_FEISHU_APP_SECRET!.length < 20) {
+    throw new Error("production HARA_CRASH_FEISHU_APP_SECRET is too short");
+  }
+  if (!/^oc_[A-Za-z0-9]+$/u.test(env.HARA_CRASH_FEISHU_CHAT_ID!)) {
+    throw new Error("production HARA_CRASH_FEISHU_CHAT_ID is invalid");
+  }
+  if (!/^ou_[A-Za-z0-9]+$/u.test(env.HARA_CRASH_FEISHU_MENTION_OPEN_ID!)) {
+    throw new Error("production HARA_CRASH_FEISHU_MENTION_OPEN_ID is invalid");
+  }
+}
+
 export function assertProductionRuntime(env: NodeJS.ProcessEnv = process.env): void {
   if (env.NODE_ENV !== "production") return;
   if (env.HARA_ENV_LOADED !== "1" && env.HARA_ENV_LOADED !== "container") {
@@ -44,6 +70,7 @@ export function assertProductionRuntime(env: NodeJS.ProcessEnv = process.env): v
   requireDatabaseSchema(env, "DATABASE_URL", "public");
   requireLongValue(env, "HARA_CONTROL_ADMIN_KEY");
   requireLongValue(env, "HARA_JWT_SECRET");
+  assertCrashAlertConfiguration(env);
   if (env.HARA_CONTROL_ADMIN_KEY === env.HARA_JWT_SECRET) {
     throw new Error("HARA_CONTROL_ADMIN_KEY and HARA_JWT_SECRET must be different");
   }
@@ -65,6 +92,13 @@ export function assertProductionRuntime(env: NodeJS.ProcessEnv = process.env): v
     )
   ) {
     throw new Error("the KMS master key must be independent from auth and gateway secrets");
+  }
+  if (
+    env.HARA_CRASH_FEISHU_APP_SECRET &&
+    [env.HARA_CONTROL_ADMIN_KEY, env.HARA_JWT_SECRET, env.LITELLM_MASTER_KEY, env.HARA_KMS_MASTER_KEY]
+      .includes(env.HARA_CRASH_FEISHU_APP_SECRET)
+  ) {
+    throw new Error("the Feishu App Secret must be independent from Hara runtime secrets");
   }
   if (env.GATEWAY_ADAPTER === "litellm") {
     requireLongValue(env, "LITELLM_MASTER_KEY");

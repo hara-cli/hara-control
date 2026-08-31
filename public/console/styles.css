@@ -1031,6 +1031,86 @@ tr:hover .row-actions { opacity: 1; }
   border-top: 0;
 }
 
+/* Numbered feedback workflow. Dense enough for operations, but the lifecycle stays visible. */
+.ticket-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--panel-2);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.ticket-flow span {
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+.ticket-flow i { color: var(--muted); font-style: normal; }
+.ticket-filters .select { min-width: 132px; }
+.ticket-table { min-width: 980px; }
+.ticket-table td { vertical-align: top; }
+.ticket-number { color: var(--coral); letter-spacing: .02em; }
+.ticket-kind,
+.ticket-source { color: var(--muted); font-size: 11px; }
+.ticket-issue { min-width: 280px; max-width: 540px; }
+.ticket-issue strong { display: block; color: var(--text); }
+.ticket-issue p {
+  margin: 5px 0 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.ticket-status,
+.ticket-priority {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-size: 10.5px;
+  line-height: 1.2;
+}
+.ticket-status--IN_PROGRESS,
+.ticket-status--WAITING_RELEASE { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); color: var(--accent); }
+.ticket-status--WAITING_VERIFICATION,
+.ticket-status--CLOSED { border-color: color-mix(in srgb, var(--success) 55%, var(--border)); color: var(--success); }
+.ticket-status--BLOCKED,
+.ticket-status--REJECTED { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); color: var(--danger); }
+.ticket-priority { margin-top: 5px; }
+.ticket-priority--URGENT { border-color: var(--danger); color: var(--danger); }
+.ticket-priority--HIGH { border-color: color-mix(in srgb, var(--coral) 60%, var(--border)); color: var(--coral); }
+.ticket-detail { margin-top: 18px; border-color: var(--border-strong); }
+.ticket-detail__head { align-items: flex-start; }
+.ticket-detail__number { margin-bottom: 5px; color: var(--coral); font-size: 12px; }
+.ticket-detail__summary { margin: 0 0 18px; color: var(--text-soft); white-space: pre-wrap; }
+.ticket-detail__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.ticket-detail textarea { min-height: 70px; resize: vertical; }
+.ticket-detail__actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.ticket-timeline { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+.ticket-timeline h3 { margin: 0 0 12px; color: var(--text); font-size: 13px; }
+.ticket-event { position: relative; display: grid; grid-template-columns: 12px 1fr; gap: 10px; padding-bottom: 15px; }
+.ticket-event:not(:last-child)::before { content: ""; position: absolute; left: 5px; top: 11px; bottom: 0; width: 1px; background: var(--border-strong); }
+.ticket-event__dot { z-index: 1; width: 11px; height: 11px; margin-top: 3px; border: 2px solid var(--panel); border-radius: 50%; background: var(--coral); box-shadow: 0 0 0 1px var(--border-strong); }
+.ticket-event strong { margin-right: 10px; color: var(--text); font-size: 12px; }
+.ticket-event .mono { color: var(--muted); font-size: 10.5px; }
+.ticket-event small { display: block; margin-top: 3px; color: var(--muted); }
+.ticket-event p { margin: 5px 0 0; color: var(--text-soft); line-height: 1.45; white-space: pre-wrap; }
+
+@media (max-width: 1100px) {
+  .ticket-detail__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .ticket-detail__grid { grid-template-columns: 1fr; }
+}
+
 /* User-consented Desktop crash intake — operator-only and deliberately compact. */
 .crash-privacy-note {
   display: flex;

@@ -438,6 +438,100 @@ model DesktopCrashReport {
   @@index([lastOccurredAt])
 }
 
+// ── Hara product feedback / work-order workflow ───────────────────────────────────────────
+
+enum FeedbackTicketSource {
+  FEISHU
+  CONTROL
+  INTERNAL
+}
+
+enum FeedbackTicketKind {
+  BUG
+  SUGGESTION
+  CRASH
+  OTHER
+}
+
+enum FeedbackTicketPriority {
+  URGENT
+  HIGH
+  NORMAL
+  LOW
+}
+
+enum FeedbackTicketStatus {
+  RECEIVED
+  ACKNOWLEDGED
+  IN_PROGRESS
+  WAITING_RELEASE
+  WAITING_VERIFICATION
+  CLOSED
+  BLOCKED
+  REJECTED
+}
+
+enum FeedbackTicketEventKind {
+  CREATED
+  ACKNOWLEDGED
+  STATUS_CHANGED
+  NOTE
+  RELEASED
+  CLOSED
+}
+
+/// Canonical Hara feedback ticket. Feishu is an intake and notification surface; this row is the
+/// durable workflow authority. `source + sourceRef` makes retries idempotent, while `number` gives
+/// operators and reporters a short stable handle such as HARA-000123.
+model FeedbackTicket {
+  id                String                 @id @default(uuid())
+  number            Int                    @unique @default(autoincrement())
+  source            FeedbackTicketSource
+  sourceRef         String                 @db.VarChar(200)
+  sourceChatRef     String                 @default("") @db.VarChar(200)
+  kind              FeedbackTicketKind     @default(OTHER)
+  priority          FeedbackTicketPriority @default(NORMAL)
+  status            FeedbackTicketStatus   @default(RECEIVED)
+  title             String                 @db.VarChar(240)
+  summary           String                 @default("") @db.VarChar(2000)
+  reporterRef       String                 @default("") @db.VarChar(200)
+  assignee          String                 @default("") @db.VarChar(160)
+  fixVersion        String                 @default("") @db.VarChar(64)
+  verificationSteps String                 @default("") @db.VarChar(1200)
+  claimOwner        String                 @default("") @db.VarChar(160)
+  claimTokenHash    String                 @default("") @db.VarChar(64)
+  claimExpiresAt    DateTime?
+  acknowledgedAt    DateTime?
+  startedAt         DateTime?
+  releasedAt        DateTime?
+  closedAt          DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  events FeedbackTicketEvent[]
+
+  @@unique([source, sourceRef], map: "FeedbackTicket_source_sourceRef_key")
+  @@index([status, priority, updatedAt])
+  @@index([kind, updatedAt])
+  @@index([claimExpiresAt])
+}
+
+/// Append-only ticket timeline. State changes and operator notes stay reviewable even after a ticket
+/// closes; only already-redacted summaries are accepted by the service.
+model FeedbackTicketEvent {
+  id         String                  @id @default(uuid())
+  ticket     FeedbackTicket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId   String
+  kind       FeedbackTicketEventKind
+  fromStatus FeedbackTicketStatus?
+  toStatus   FeedbackTicketStatus?
+  note       String                  @default("") @db.VarChar(1200)
+  actor      String                  @default("") @db.VarChar(160)
+  createdAt  DateTime                @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
 model Team {
   id        String       @id @default(uuid())
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)

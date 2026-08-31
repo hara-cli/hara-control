@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { assertProductionRuntime } from "../src/config/runtime-security";
 
 const valid: NodeJS.ProcessEnv = {
@@ -18,6 +21,21 @@ const valid: NodeJS.ProcessEnv = {
 test("production runtime accepts a preflighted, separated configuration", () => {
   assert.doesNotThrow(() => assertProductionRuntime({ ...valid }));
   assert.doesNotThrow(() => assertProductionRuntime({ ...valid, HARA_ENV_LOADED: "container" }));
+  assert.doesNotThrow(() => assertProductionRuntime({
+    ...valid,
+    HARA_FEEDBACK_INTAKE_KEY: "feedback-abcdefghijklmnopqrstuvwxyz",
+  }));
+  const dir = mkdtempSync(join(tmpdir(), "hara-feedback-key-"));
+  try {
+    const keyfile = join(dir, "feedback.key");
+    writeFileSync(keyfile, "feedback-file-abcdefghijklmnopqrstuvwxyz", { mode: 0o600 });
+    assert.doesNotThrow(() => assertProductionRuntime({
+      ...valid,
+      HARA_FEEDBACK_INTAKE_KEYFILE: keyfile,
+    }));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("production runtime rejects deploy-script bypass and reused signing/admin secrets", () => {
@@ -40,6 +58,24 @@ test("production runtime rejects deploy-script bypass and reused signing/admin s
   assert.throws(
     () => assertProductionRuntime({ ...valid, HARA_KMS_MASTER_KEY: "too-short" }),
     /exactly 32 bytes/,
+  );
+  assert.throws(
+    () => assertProductionRuntime({ ...valid, HARA_FEEDBACK_INTAKE_KEY: "short" }),
+    /feedback intake credential is too short/,
+  );
+  assert.throws(
+    () => assertProductionRuntime({
+      ...valid,
+      HARA_FEEDBACK_INTAKE_KEY: valid.HARA_JWT_SECRET,
+    }),
+    /must be independent/,
+  );
+  assert.throws(
+    () => assertProductionRuntime({
+      ...valid,
+      HARA_FEEDBACK_INTAKE_KEY: valid.HARA_KMS_MASTER_KEY,
+    }),
+    /KMS master key/,
   );
 });
 

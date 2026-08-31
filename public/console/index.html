@@ -98,6 +98,12 @@
         </span>
         <span data-i18n="nav.learnings">Learning</span>
       </a>
+      <a class="sidebar__item hidden" id="nav-tickets" href="#/tickets" data-route="tickets">
+        <span class="sidebar__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4a2 2 0 0 0 0 4v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 0 0-4z"/><path d="M9 8h6M9 12h4M9 16h6"/></svg>
+        </span>
+        <span data-i18n="nav.tickets">Tickets</span>
+      </a>
       <a class="sidebar__item hidden" id="nav-crashes" href="#/crashes" data-route="crashes">
         <span class="sidebar__item-icon" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h8M9 2v3m6-3v3M6 9H3m18 0h-3M6 15H3m18 0h-3"/><rect x="6" y="5" width="12" height="16" rx="6"/><path d="M9 11h6M9 15h6"/></svg>
@@ -506,6 +512,113 @@
       <div id="learning-list" aria-live="polite">
         <div class="empty" data-i18n="learnings.empty.choose_org">Choose an organization to review its learning ledger.</div>
       </div>
+    </section>
+
+    <!-- FEEDBACK TICKETS · SUPERADMIN ONLY -->
+    <section class="view hidden" id="view-tickets" data-view="tickets">
+      <div class="view__header">
+        <div class="view__title-block">
+          <h1 class="view__title" data-i18n="nav.tickets">Tickets</h1>
+          <p class="view__subtitle" data-i18n="tickets.hint">One numbered workflow for Feishu feedback, Control intake, releases, and tester verification.</p>
+        </div>
+        <button type="button" class="btn-ghost" id="ticket-refresh" data-i18n="tickets.refresh">Refresh</button>
+      </div>
+
+      <div class="ticket-flow" role="list" aria-label="Ticket workflow">
+        <span role="listitem" data-i18n="tickets.status.RECEIVED">Received</span><i aria-hidden="true">→</i>
+        <span role="listitem" data-i18n="tickets.status.ACKNOWLEDGED">Acknowledged</span><i aria-hidden="true">→</i>
+        <span role="listitem" data-i18n="tickets.status.IN_PROGRESS">In progress</span><i aria-hidden="true">→</i>
+        <span role="listitem" data-i18n="tickets.status.WAITING_RELEASE">Waiting release</span><i aria-hidden="true">→</i>
+        <span role="listitem" data-i18n="tickets.status.WAITING_VERIFICATION">Waiting verification</span><i aria-hidden="true">→</i>
+        <span role="listitem" data-i18n="tickets.status.CLOSED">Closed</span>
+      </div>
+
+      <div class="filter-bar ticket-filters">
+        <label class="field__label" for="ticket-status" data-i18n="tickets.filter.status">Status</label>
+        <select class="select" id="ticket-status">
+          <option value="" data-i18n="tickets.status.ALL">All</option>
+          <option value="RECEIVED" data-i18n="tickets.status.RECEIVED">Received</option>
+          <option value="ACKNOWLEDGED" data-i18n="tickets.status.ACKNOWLEDGED">Acknowledged</option>
+          <option value="IN_PROGRESS" data-i18n="tickets.status.IN_PROGRESS">In progress</option>
+          <option value="WAITING_RELEASE" data-i18n="tickets.status.WAITING_RELEASE">Waiting release</option>
+          <option value="WAITING_VERIFICATION" data-i18n="tickets.status.WAITING_VERIFICATION">Waiting verification</option>
+          <option value="BLOCKED" data-i18n="tickets.status.BLOCKED">Blocked</option>
+          <option value="CLOSED" data-i18n="tickets.status.CLOSED">Closed</option>
+          <option value="REJECTED" data-i18n="tickets.status.REJECTED">Rejected</option>
+        </select>
+        <label class="field__label" for="ticket-kind" data-i18n="tickets.filter.kind">Kind</label>
+        <select class="select" id="ticket-kind">
+          <option value="" data-i18n="tickets.kind.ALL">All</option>
+          <option value="BUG" data-i18n="tickets.kind.BUG">Bug</option>
+          <option value="SUGGESTION" data-i18n="tickets.kind.SUGGESTION">Suggestion</option>
+          <option value="CRASH" data-i18n="tickets.kind.CRASH">Crash</option>
+          <option value="OTHER" data-i18n="tickets.kind.OTHER">Other</option>
+        </select>
+        <label class="field__label" for="ticket-priority" data-i18n="tickets.filter.priority">Priority</label>
+        <select class="select" id="ticket-priority">
+          <option value="" data-i18n="tickets.priority.ALL">All</option>
+          <option value="URGENT" data-i18n="tickets.priority.URGENT">Urgent</option>
+          <option value="HIGH" data-i18n="tickets.priority.HIGH">High</option>
+          <option value="NORMAL" data-i18n="tickets.priority.NORMAL">Normal</option>
+          <option value="LOW" data-i18n="tickets.priority.LOW">Low</option>
+        </select>
+        <span class="text-soft" id="ticket-count">—</span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table ticket-table">
+          <thead><tr>
+            <th data-i18n="tickets.col.number">Ticket</th>
+            <th data-i18n="tickets.col.updated">Updated</th>
+            <th data-i18n="tickets.col.issue">Issue</th>
+            <th data-i18n="tickets.col.source">Source</th>
+            <th data-i18n="tickets.col.workflow">Workflow</th>
+            <th data-i18n="tickets.col.action">Action</th>
+          </tr></thead>
+          <tbody id="ticket-body"><tr><td colspan="6" class="text-soft" data-i18n="common.loading">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <section class="card ticket-detail hidden" id="ticket-detail" aria-live="polite">
+        <div class="card__head ticket-detail__head">
+          <div>
+            <div class="mono ticket-detail__number" id="ticket-detail-number">—</div>
+            <h2 class="card__title" id="ticket-detail-title">—</h2>
+          </div>
+          <button type="button" class="btn-ghost" id="ticket-detail-close" data-i18n="common.close">Close</button>
+        </div>
+        <p class="ticket-detail__summary" id="ticket-detail-summary"></p>
+        <div class="ticket-detail__grid">
+          <div class="field">
+            <label class="field__label" for="ticket-detail-status" data-i18n="tickets.filter.status">Status</label>
+            <select class="select" id="ticket-detail-status"></select>
+          </div>
+          <div class="field">
+            <label class="field__label" for="ticket-detail-priority" data-i18n="tickets.filter.priority">Priority</label>
+            <select class="select" id="ticket-detail-priority"></select>
+          </div>
+          <div class="field">
+            <label class="field__label" for="ticket-detail-assignee" data-i18n="tickets.assignee">Assignee</label>
+            <input class="input" id="ticket-detail-assignee" maxlength="160">
+          </div>
+          <div class="field">
+            <label class="field__label" for="ticket-detail-version" data-i18n="tickets.fix_version">Fix version</label>
+            <input class="input input--mono" id="ticket-detail-version" maxlength="64">
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="ticket-detail-verification" data-i18n="tickets.verification">Verification steps</label>
+          <textarea class="input" id="ticket-detail-verification" maxlength="1200"></textarea>
+        </div>
+        <div class="field">
+          <label class="field__label" for="ticket-detail-note" data-i18n="tickets.note">Timeline note</label>
+          <textarea class="input" id="ticket-detail-note" maxlength="1200"></textarea>
+        </div>
+        <div class="ticket-detail__actions">
+          <button type="button" class="btn" id="ticket-detail-save" data-i18n="tickets.save">Save workflow update</button>
+        </div>
+        <div class="ticket-timeline" id="ticket-timeline"></div>
+      </section>
     </section>
 
     <!-- CRASH REPORTS · SUPERADMIN ONLY -->

@@ -297,10 +297,13 @@
       // SUPERADMIN gets the Users nav item; others don't even see it
       if (me.role === "SUPERADMIN") {
         $("#nav-users").classList.remove("hidden");
+        $("#nav-tickets").classList.remove("hidden");
         $("#nav-crashes").classList.remove("hidden");
         $("#ec-never-expires-wrap").classList.remove("hidden");
       } else {
         $("#nav-users").classList.add("hidden");
+        $("#nav-tickets").classList.add("hidden");
+        $("#nav-crashes").classList.add("hidden");
         $("#ec-never-expires-wrap").classList.add("hidden");
         $("#ec-never-expires").checked = false;
       }
@@ -366,7 +369,7 @@
   // ║ 7.  hash router                                                   ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   const router = (() => {
-    const ROUTES = ["overview", "orgs", "fleet", "usage", "learnings", "crashes", "enroll", "users", "security"];
+    const ROUTES = ["overview", "orgs", "fleet", "usage", "learnings", "tickets", "crashes", "enroll", "users", "security"];
     const handlers = {};   // optional onEnter hooks per view
 
     let last = null;
@@ -387,7 +390,7 @@
     function dispatch() {
       const name = current();
       // Authorize global operator views in both navigation and direct hash URLs.
-      if (["users", "crashes"].includes(name) && (!me || me.role !== "SUPERADMIN")) {
+      if (["users", "tickets", "crashes"].includes(name) && (!me || me.role !== "SUPERADMIN")) {
         navigate("overview");
         return;
       }
@@ -420,6 +423,7 @@
     if (r === "fleet" && lastFleetRows) renderFleet();
     if (r === "usage" && lastUsageReport) renderUsage(lastUsageReport);
     if (r === "learnings" && lastLearningRows) renderLearnings(lastLearningRows);
+    if (r === "tickets" && lastTicketRows) renderFeedbackTickets(lastTicketRows);
     if (r === "crashes" && lastCrashRows) renderCrashReports(lastCrashRows);
     if (r === "users") loadUsers();
     if (r === "orgs") {
@@ -1019,7 +1023,174 @@
   });
 
   // ╔═══════════════════════════════════════════════════════════════════╗
-  // ║ 12.  User-consented Desktop crash reports (SUPERADMIN)           ║
+  // ║ 12.  Numbered Hara feedback workflow (SUPERADMIN)                ║
+  // ╚═══════════════════════════════════════════════════════════════════╝
+  const TICKET_STATUSES = [
+    "RECEIVED",
+    "ACKNOWLEDGED",
+    "IN_PROGRESS",
+    "WAITING_RELEASE",
+    "WAITING_VERIFICATION",
+    "BLOCKED",
+    "CLOSED",
+    "REJECTED",
+  ];
+  const TICKET_TRANSITIONS = {
+    RECEIVED: ["ACKNOWLEDGED", "IN_PROGRESS", "BLOCKED", "REJECTED"],
+    ACKNOWLEDGED: ["IN_PROGRESS", "BLOCKED", "REJECTED"],
+    IN_PROGRESS: ["WAITING_RELEASE", "BLOCKED", "REJECTED"],
+    WAITING_RELEASE: ["IN_PROGRESS", "WAITING_VERIFICATION", "BLOCKED"],
+    WAITING_VERIFICATION: ["IN_PROGRESS", "CLOSED", "BLOCKED"],
+    CLOSED: ["IN_PROGRESS"],
+    BLOCKED: ["IN_PROGRESS", "REJECTED"],
+    REJECTED: ["IN_PROGRESS"],
+  };
+  const TICKET_PRIORITIES = ["URGENT", "HIGH", "NORMAL", "LOW"];
+  let lastTicketRows = null;
+  let selectedTicket = null;
+  let ticketRequestId = 0;
+
+  router.on("tickets", loadFeedbackTickets);
+  $("#ticket-refresh").addEventListener("click", loadFeedbackTickets);
+  ["#ticket-status", "#ticket-kind", "#ticket-priority"].forEach((selector) => {
+    $(selector).addEventListener("change", loadFeedbackTickets);
+  });
+
+  async function loadFeedbackTickets() {
+    if (!me || me.role !== "SUPERADMIN") return;
+    const requestId = ++ticketRequestId;
+    const refresh = $("#ticket-refresh");
+    const query = new URLSearchParams({ limit: "200" });
+    const status = $("#ticket-status").value;
+    const kind = $("#ticket-kind").value;
+    const priority = $("#ticket-priority").value;
+    if (status) query.set("status", status);
+    if (kind) query.set("kind", kind);
+    if (priority) query.set("priority", priority);
+    refresh.disabled = true;
+    $("#ticket-body").innerHTML = `<tr><td colspan="6" class="text-soft">${escapeHtml(I18N.t("common.loading"))}</td></tr>`;
+    try {
+      const rows = await api("GET", `/admin/feedback-tickets?${query}`);
+      if (requestId !== ticketRequestId) return;
+      lastTicketRows = Array.isArray(rows) ? rows : [];
+      renderFeedbackTickets(lastTicketRows);
+      if (selectedTicket && !lastTicketRows.some((row) => row.id === selectedTicket.id)) {
+        closeTicketDetail();
+      }
+    } catch (error) {
+      if (requestId !== ticketRequestId) return;
+      lastTicketRows = null;
+      $("#ticket-count").textContent = "—";
+      $("#ticket-body").innerHTML = `<tr><td colspan="6" class="text-soft">${escapeHtml(error.message)}</td></tr>`;
+      toast(error.message, "err");
+    } finally {
+      if (requestId === ticketRequestId) refresh.disabled = false;
+    }
+  }
+
+  function renderFeedbackTickets(rows) {
+    $("#ticket-count").textContent = I18N.t("tickets.count", { n: rows.length });
+    const body = $("#ticket-body");
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="6" class="text-soft">${escapeHtml(I18N.t("tickets.empty"))}</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map((row) => `<tr data-ticket-row="${escapeHtml(row.id)}">
+      <td><strong class="mono ticket-number">${escapeHtml(row.ticketNumber || "—")}</strong><br><span class="ticket-kind">${escapeHtml(I18N.t(`tickets.kind.${row.kind}`))}</span></td>
+      <td class="mono">${escapeHtml(formatDateTime(row.updatedAt))}</td>
+      <td class="ticket-issue"><strong>${escapeHtml(row.title || "—")}</strong>${row.summary ? `<p>${escapeHtml(row.summary)}</p>` : ""}</td>
+      <td><span class="ticket-source">${escapeHtml(I18N.t(`tickets.source.${row.source}`))}</span><br><span class="text-soft mono">${escapeHtml(truncateMid(row.sourceRef || "", 12, 6))}</span></td>
+      <td><span class="ticket-status ticket-status--${escapeHtml(row.status)}">${escapeHtml(I18N.t(`tickets.status.${row.status}`))}</span><br><span class="ticket-priority ticket-priority--${escapeHtml(row.priority)}">${escapeHtml(I18N.t(`tickets.priority.${row.priority}`))}</span>${row.assignee ? `<br><span class="text-soft">${escapeHtml(row.assignee)}</span>` : ""}</td>
+      <td><button type="button" class="btn-ghost" data-ticket-open>${escapeHtml(I18N.t("tickets.open"))}</button></td>
+    </tr>`).join("");
+  }
+
+  $("#ticket-body").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-ticket-open]");
+    if (!button) return;
+    const row = button.closest("tr[data-ticket-row]");
+    const id = row && row.getAttribute("data-ticket-row");
+    if (!id) return;
+    button.disabled = true;
+    try {
+      selectedTicket = await api("GET", `/admin/feedback-tickets/${encodeURIComponent(id)}`);
+      renderTicketDetail(selectedTicket);
+    } catch (error) {
+      toast(error.message, "err");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  function ticketStatusOptions(active) {
+    const allowed = new Set([active, ...(TICKET_TRANSITIONS[active] || [])]);
+    return TICKET_STATUSES.filter((status) => allowed.has(status)).map((status) =>
+      `<option value="${status}"${status === active ? " selected" : ""}>${escapeHtml(I18N.t(`tickets.status.${status}`))}</option>`
+    ).join("");
+  }
+
+  function ticketPriorityOptions(active) {
+    return TICKET_PRIORITIES.map((priority) =>
+      `<option value="${priority}"${priority === active ? " selected" : ""}>${escapeHtml(I18N.t(`tickets.priority.${priority}`))}</option>`
+    ).join("");
+  }
+
+  function renderTicketDetail(ticket) {
+    const detail = $("#ticket-detail");
+    detail.classList.remove("hidden");
+    $("#ticket-detail-number").textContent = ticket.ticketNumber || "—";
+    $("#ticket-detail-title").textContent = ticket.title || "—";
+    $("#ticket-detail-summary").textContent = ticket.summary || I18N.t("tickets.summary.empty");
+    $("#ticket-detail-status").innerHTML = ticketStatusOptions(ticket.status);
+    $("#ticket-detail-priority").innerHTML = ticketPriorityOptions(ticket.priority);
+    $("#ticket-detail-assignee").value = ticket.assignee || "";
+    $("#ticket-detail-version").value = ticket.fixVersion || "";
+    $("#ticket-detail-verification").value = ticket.verificationSteps || "";
+    $("#ticket-detail-note").value = "";
+    const events = Array.isArray(ticket.events) ? ticket.events : [];
+    $("#ticket-timeline").innerHTML = `<h3>${escapeHtml(I18N.t("tickets.timeline"))}</h3>` + (events.length
+      ? events.map((entry) => `<div class="ticket-event">
+          <span class="ticket-event__dot" aria-hidden="true"></span>
+          <div><strong>${escapeHtml(I18N.t(`tickets.event.${entry.kind}`))}</strong><span class="mono">${escapeHtml(formatDateTime(entry.createdAt))}</span>
+          <small>${escapeHtml(entry.actor || "—")}${entry.fromStatus && entry.toStatus && entry.fromStatus !== entry.toStatus ? ` · ${escapeHtml(I18N.t(`tickets.status.${entry.fromStatus}`))} → ${escapeHtml(I18N.t(`tickets.status.${entry.toStatus}`))}` : ""}</small>
+          ${entry.note ? `<p>${escapeHtml(entry.note)}</p>` : ""}</div>
+        </div>`).join("")
+      : `<div class="text-soft">${escapeHtml(I18N.t("tickets.timeline.empty"))}</div>`);
+    detail.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function closeTicketDetail() {
+    selectedTicket = null;
+    $("#ticket-detail").classList.add("hidden");
+  }
+
+  $("#ticket-detail-close").addEventListener("click", closeTicketDetail);
+  $("#ticket-detail-save").addEventListener("click", async () => {
+    if (!selectedTicket) return;
+    const button = $("#ticket-detail-save");
+    button.disabled = true;
+    try {
+      await api("PATCH", `/admin/feedback-tickets/${encodeURIComponent(selectedTicket.id)}`, {
+        status: $("#ticket-detail-status").value,
+        priority: $("#ticket-detail-priority").value,
+        assignee: $("#ticket-detail-assignee").value.trim(),
+        fixVersion: $("#ticket-detail-version").value.trim(),
+        verificationSteps: $("#ticket-detail-verification").value.trim(),
+        note: $("#ticket-detail-note").value.trim(),
+      });
+      selectedTicket = await api("GET", `/admin/feedback-tickets/${encodeURIComponent(selectedTicket.id)}`);
+      renderTicketDetail(selectedTicket);
+      toast(I18N.t("tickets.saved"), "ok");
+      await loadFeedbackTickets();
+    } catch (error) {
+      toast(error.message, "err");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  // ╔═══════════════════════════════════════════════════════════════════╗
+  // ║ 13.  User-consented Desktop crash reports (SUPERADMIN)           ║
   // ╚═══════════════════════════════════════════════════════════════════╝
   let lastCrashRows = null;
   let crashRequestId = 0;

@@ -17,6 +17,7 @@ import { ProviderCredentialsModule } from "./providers/provider-credentials.modu
 import { TenantServiceBindingsModule } from "./service-bindings/service-bindings.module";
 import { LearningsModule } from "./learnings/learnings.module";
 import { CrashReportsModule } from "./crash-reports/crash-reports.module";
+import { FeedbackTicketsModule } from "./feedback-tickets/feedback-tickets.module";
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { CrashReportsModule } from "./crash-reports/crash-reports.module";
     TenantServiceBindingsModule,
     LearningsModule,
     CrashReportsModule,
+    FeedbackTicketsModule,
   ],
 })
 export class AppModule {}

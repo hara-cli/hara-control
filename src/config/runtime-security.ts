@@ -2,8 +2,10 @@
  * Defense-in-depth for operators who bypass the supported deploy scripts. Production must have
  * passed the owner-only env preflight and must not reuse control-plane secrets.
  */
+import { timingSafeEqual } from "node:crypto";
 import { allowedManagedModels, defaultManagedModel } from "../providers/model-policy";
 import { kmsProvider, LocalKeyfileKms } from "../security/kms";
+import { loadFeedbackIntakeKey } from "./feedback-intake";
 
 function requireLongValue(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
@@ -32,6 +34,20 @@ function requireDatabaseSchema(
   if (url.searchParams.get("schema") !== expectedSchema) {
     throw new Error(`${name} must explicitly use schema=${expectedSchema}`);
   }
+}
+
+function secretDecodesTo(secret: string, expected: Buffer): boolean {
+  const candidates: Buffer[] = [];
+  if (/^[0-9a-fA-F]{64}$/u.test(secret)) candidates.push(Buffer.from(secret, "hex"));
+  try {
+    const decoded = Buffer.from(secret, "base64url");
+    if (decoded.length === expected.length) candidates.push(decoded);
+  } catch {
+    // Non-encoded purpose credentials are valid; they simply cannot equal the encoded KMS key.
+  }
+  return candidates.some((candidate) => (
+    candidate.length === expected.length && timingSafeEqual(candidate, expected)
+  ));
 }
 
 function assertCrashAlertConfiguration(env: NodeJS.ProcessEnv): void {
@@ -70,9 +86,23 @@ export function assertProductionRuntime(env: NodeJS.ProcessEnv = process.env): v
   requireDatabaseSchema(env, "DATABASE_URL", "public");
   requireLongValue(env, "HARA_CONTROL_ADMIN_KEY");
   requireLongValue(env, "HARA_JWT_SECRET");
+  const feedbackIntakeKey = loadFeedbackIntakeKey(env);
   assertCrashAlertConfiguration(env);
   if (env.HARA_CONTROL_ADMIN_KEY === env.HARA_JWT_SECRET) {
     throw new Error("HARA_CONTROL_ADMIN_KEY and HARA_JWT_SECRET must be different");
+  }
+  if (
+    feedbackIntakeKey
+    && [
+      env.HARA_CONTROL_ADMIN_KEY,
+      env.HARA_JWT_SECRET,
+      env.LITELLM_MASTER_KEY,
+      env.UPSTREAM_API_KEY,
+      env.HARA_CRASH_FEISHU_APP_SECRET,
+    ]
+      .includes(feedbackIntakeKey)
+  ) {
+    throw new Error("HARA_FEEDBACK_INTAKE_KEY must be independent from all runtime secrets");
   }
   if (!env.HARA_KMS_KEYFILE && !env.HARA_KMS_MASTER_KEY) {
     throw new Error("production configuration missing a KMS master-key source");
@@ -84,6 +114,10 @@ export function assertProductionRuntime(env: NodeJS.ProcessEnv = process.env): v
     throw new Error("the configured production KMS provider is not implemented");
   }
   const kmsMaster = LocalKeyfileKms.loadMasterKey(env);
+  if (feedbackIntakeKey && secretDecodesTo(feedbackIntakeKey, kmsMaster)) {
+    kmsMaster.fill(0);
+    throw new Error("HARA_FEEDBACK_INTAKE_KEY must be independent from the KMS master key");
+  }
   kmsMaster.fill(0);
   if (
     env.HARA_KMS_MASTER_KEY &&

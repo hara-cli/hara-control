@@ -8,7 +8,7 @@ import {
   openSync,
   readFileSync,
 } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 function fail(message) {
@@ -141,12 +141,39 @@ function validateCrashAlertEnv(env) {
   if (!/^ou_[A-Za-z0-9]+$/.test(env.HARA_CRASH_FEISHU_MENTION_OPEN_ID)) fail("HARA_CRASH_FEISHU_MENTION_OPEN_ID is invalid");
 }
 
+function loadFeedbackIntakeKey(env) {
+  const inline = (env.HARA_FEEDBACK_INTAKE_KEY || "").trim();
+  const keyfile = (env.HARA_FEEDBACK_INTAKE_KEYFILE || "").trim();
+  if (inline && keyfile) fail("configure only one feedback intake key source");
+  if (!inline && !keyfile) return "";
+  if (keyfile && !isAbsolute(keyfile)) {
+    fail("HARA_FEEDBACK_INTAKE_KEYFILE must be absolute");
+  }
+  const key = inline || readPrivateFile(keyfile, "HARA_FEEDBACK_INTAKE_KEYFILE").trim();
+  if (key.length < 32) fail("feedback intake credential is too short");
+  return key;
+}
+
 export function validateProductionEnv(env, envPath) {
   requireDatabaseSchema(env, "DATABASE_URL", "public");
   requireValue(env, "HARA_CONTROL_ADMIN_KEY", 24);
   requireValue(env, "HARA_JWT_SECRET", 24);
+  const feedbackIntakeKey = loadFeedbackIntakeKey(env);
   if (env.HARA_CONTROL_ADMIN_KEY === env.HARA_JWT_SECRET) {
     fail("HARA_CONTROL_ADMIN_KEY and HARA_JWT_SECRET must be different");
+  }
+  if (
+    feedbackIntakeKey
+    && [
+      env.HARA_CONTROL_ADMIN_KEY,
+      env.HARA_JWT_SECRET,
+      env.LITELLM_MASTER_KEY,
+      env.UPSTREAM_API_KEY,
+      env.HARA_CRASH_FEISHU_APP_SECRET,
+    ]
+      .includes(feedbackIntakeKey)
+  ) {
+    fail("HARA_FEEDBACK_INTAKE_KEY must be independent from all runtime secrets");
   }
   validateCrashAlertEnv(env);
   if (
@@ -201,7 +228,13 @@ export function validateProductionEnv(env, envPath) {
   }
   const master = decodeMasterKey(masterRaw);
   if (!master) fail("the KMS master key must decode to exactly 32 bytes");
-  master.fill(0);
+  const feedbackAsMaster = feedbackIntakeKey ? decodeMasterKey(feedbackIntakeKey) : null;
+  if (feedbackAsMaster?.equals(master)) {
+    feedbackAsMaster.fill(0);
+    master.fill(0);
+    fail("HARA_FEEDBACK_INTAKE_KEY must be independent from the KMS master key");
+  }
+  feedbackAsMaster?.fill(0);
 
   for (const name of [
     "HARA_CONTROL_ADMIN_KEY",
@@ -212,6 +245,7 @@ export function validateProductionEnv(env, envPath) {
   ]) {
     if (env[name] && env[name] === masterRaw) fail(`the KMS master key must not reuse ${name}`);
   }
+  master.fill(0);
 
   if (env.NODE_ENV && env.NODE_ENV !== "production") {
     fail("NODE_ENV must be production for this deployment path");

@@ -8,6 +8,7 @@ import {
 import { DesktopCrashAlertState, DesktopCrashReportStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import type { AuthedUser } from "../common/admin-auth.guard";
+import { sanitizeControlText } from "../common/redact";
 import type {
   SubmitDesktopCrashReportDto,
   UpdateDesktopCrashReportDto,
@@ -19,26 +20,8 @@ const GLOBAL_WINDOW_MS = 60 * 60 * 1000;
 const FINGERPRINT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_GLOBAL_PER_HOUR = 1_000;
 const MAX_PER_FINGERPRINT_PER_DAY = 12;
-const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu;
-const CREDENTIAL_ASSIGNMENT = /\b(?:api[_-]?key|token|secret|password|authorization|cookie)\s*[:=]\s*[^\s,;]+/giu;
-const BEARER_CREDENTIAL = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/giu;
-const COMMON_SECRET = /\b(?:sk|ak|rk|pk|ghp|gho|ghu|ghs|github_pat|xoxb|xoxp|xoxa|xoxr)[-_][A-Za-z0-9._-]{8,}\b/giu;
-const WINDOWS_HOME_PATH = /\b[A-Za-z]:\\(?:Users|Documents and Settings)\\[^\s,;"']+/gu;
-const POSIX_HOME_PATH = /\/(?:Users|home)\/[^\s,;"']+/gu;
-const URL_SECRET = /([?&](?:api[_-]?key|token|secret|password|authorization)=)[^&#\s]+/giu;
-
 export function sanitizeCrashText(value: string, max: number): string {
-  return value
-    .replace(CONTROL_CHARACTERS, " ")
-    .replace(CREDENTIAL_ASSIGNMENT, "credential=***")
-    .replace(BEARER_CREDENTIAL, "Bearer ***")
-    .replace(COMMON_SECRET, "<secret>")
-    .replace(WINDOWS_HOME_PATH, "<local-path>")
-    .replace(POSIX_HOME_PATH, "<local-path>")
-    .replace(URL_SECRET, "$1***")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, max);
+  return sanitizeControlText(value, max);
 }
 
 @Injectable()

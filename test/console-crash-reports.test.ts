@@ -23,7 +23,7 @@ test("operator console exposes a SUPERADMIN-only crash report inbox", () => {
   for (const id of ["nav-crashes", "view-crashes", "crash-refresh", "crash-status", "crash-count", "crash-body"]) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
-  assert.match(app, /\["users", "crashes"\]\.includes\(name\)/);
+  assert.match(app, /\["users", "tickets", "crashes"\]\.includes\(name\)/);
   assert.match(app, /me\.role === "SUPERADMIN"[\s\S]*nav-crashes/);
   assert.match(app, /api\("GET", `\/admin\/crash-reports\?\$\{query\}`\)/);
   const controller = readFileSync(join(root, "src", "crash-reports", "crash-reports.controller.ts"), "utf8");

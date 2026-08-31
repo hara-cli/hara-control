@@ -28,6 +28,7 @@ function validEnv(dir: string): string {
       "DATABASE_URL=postgresql://user:password@db.invalid/hara?schema=public",
       "HARA_CONTROL_ADMIN_KEY=admin-abcdefghijklmnopqrstuvwxyz",
       "HARA_JWT_SECRET=jwt-abcdefghijklmnopqrstuvwxyz0123",
+      "HARA_FEEDBACK_INTAKE_KEY=feedback-abcdefghijklmnopqrstuvwxyz",
       `HARA_KMS_KEYFILE=${keyfile}`,
       "GATEWAY_ADAPTER=litellm",
       "LITELLM_URL=http://127.0.0.1:4000",
@@ -116,6 +117,77 @@ test("production wrapper rejects a LiteLLM database URL that can touch the contr
     });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /LITELLM_DATABASE_URL.*schema=litellm/);
+  });
+});
+
+test("production wrapper rejects a reused feedback intake credential", () => {
+  withTemp((dir) => {
+    const envFile = validEnv(dir);
+    const unsafe = readFileSync(envFile, "utf8").replace(
+      "HARA_FEEDBACK_INTAKE_KEY=feedback-abcdefghijklmnopqrstuvwxyz",
+      "HARA_FEEDBACK_INTAKE_KEY=jwt-abcdefghijklmnopqrstuvwxyz0123",
+    );
+    writeFileSync(envFile, unsafe, { mode: 0o600 });
+    const result = spawnSync(process.execPath, [script, envFile, "--", process.execPath, "-e", ""], {
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /HARA_FEEDBACK_INTAKE_KEY must be independent/);
+  });
+});
+
+test("production wrapper accepts an owner-only feedback intake keyfile", () => {
+  withTemp((dir) => {
+    const envFile = validEnv(dir);
+    const feedbackKeyfile = join(dir, "feedback.key");
+    writeFileSync(feedbackKeyfile, "feedback-file-abcdefghijklmnopqrstuvwxyz", { mode: 0o600 });
+    const withKeyfile = readFileSync(envFile, "utf8").replace(
+      "HARA_FEEDBACK_INTAKE_KEY=feedback-abcdefghijklmnopqrstuvwxyz",
+      `HARA_FEEDBACK_INTAKE_KEYFILE=${feedbackKeyfile}`,
+    );
+    writeFileSync(envFile, withKeyfile, { mode: 0o600 });
+    const result = spawnSync(
+      process.execPath,
+      [script, envFile, "--", process.execPath, "-e", "process.stdout.write('ready')"],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "ready");
+  });
+});
+
+test("production wrapper rejects an unsafe feedback intake keyfile", () => {
+  withTemp((dir) => {
+    const envFile = validEnv(dir);
+    const feedbackKeyfile = join(dir, "feedback.key");
+    writeFileSync(feedbackKeyfile, "feedback-file-abcdefghijklmnopqrstuvwxyz", { mode: 0o644 });
+    const withKeyfile = readFileSync(envFile, "utf8").replace(
+      "HARA_FEEDBACK_INTAKE_KEY=feedback-abcdefghijklmnopqrstuvwxyz",
+      `HARA_FEEDBACK_INTAKE_KEYFILE=${feedbackKeyfile}`,
+    );
+    writeFileSync(envFile, withKeyfile, { mode: 0o600 });
+    const result = spawnSync(process.execPath, [script, envFile, "--", process.execPath, "-e", ""], {
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /chmod 600/);
+  });
+});
+
+test("production wrapper rejects reuse of the KMS keyfile for feedback intake", () => {
+  withTemp((dir) => {
+    const envFile = validEnv(dir);
+    const kmsKeyfile = join(dir, "kms.key");
+    const reused = readFileSync(envFile, "utf8").replace(
+      "HARA_FEEDBACK_INTAKE_KEY=feedback-abcdefghijklmnopqrstuvwxyz",
+      `HARA_FEEDBACK_INTAKE_KEYFILE=${kmsKeyfile}`,
+    );
+    writeFileSync(envFile, reused, { mode: 0o600 });
+    const result = spawnSync(process.execPath, [script, envFile, "--", process.execPath, "-e", ""], {
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /KMS master key/);
   });
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "hara-control",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "private": true,
   "description": "Apache-2.0 self-hosted control plane for the Hara fleet.",
   "license": "Apache-2.0",
@@ -38,7 +38,7 @@
   },
   "overrides": {
     "deepmerge-ts": "8.0.0",
-    "fast-uri": "3.1.5",
+    "fast-uri": "3.1.7",
     "js-yaml": "4.3.1"
   }
 }

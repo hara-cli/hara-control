@@ -194,6 +194,20 @@ export function enrollmentManagedModels(
   return models;
 }
 
+/** Read-only admin views must remain available for old device records after the deployment catalog
+ * changes. New enrollment stays strict through `enrollmentManagedModels`; an already-recorded token
+ * whose selected model has since been retired receives an empty current catalog instead of making the
+ * entire fleet/usage response fail. Invalid deployment configuration still throws. */
+export function managedModelsForRecordedToken(
+  selected: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  if (env.GATEWAY_ADAPTER !== "litellm") return selected ? [selected] : [];
+  const models = allowedManagedModels(env);
+  const resolved = canonicalManagedModelId(selected) || defaultManagedModel(env);
+  return models.includes(resolved) ? models : [];
+}
+
 /** Keep the one legacy alias already bound to an older device key as a hidden compatibility route.
  * New clients see only `catalog`; old clients may continue sending their persisted pre-V4 model name
  * after Control upgrades the same credential in place. */

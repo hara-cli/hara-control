@@ -148,6 +148,7 @@
     "fleet.col.person": "關聯人員",
     "fleet.col.os": "作業系統",
     "fleet.col.model": "模型",
+    "fleet.model.retired": "已退出目前策略",
     "fleet.col.spend": "用量",
     "fleet.col.keys": "Key 記錄",
     "fleet.spend.unavailable": "暫時無法取得",

@@ -98,9 +98,62 @@ test("console exposes translated revoked key history instead of hiding deleted g
   const app = readFileSync(resolve("public/console/app.js"), "utf8");
   assert.match(app, /renderFleetKeys/);
   assert.match(app, /fleet\.key\.status\.\$\{status/);
+  assert.match(app, /model_policy_status === "retired"/);
   for (const locale of ["en", "zh-CN", "zh-TW"]) {
     const messages = readFileSync(resolve(`public/console/i18n/${locale}.js`), "utf8");
     assert.match(messages, /"fleet\.col\.keys"/);
     assert.match(messages, /"fleet\.key\.revoked_at"/);
+    assert.match(messages, /"fleet\.model\.retired"/);
+  }
+});
+
+test("fleet preserves an active key whose old model left the deployment catalog", async () => {
+  const oldAdapter = process.env.GATEWAY_ADAPTER;
+  const oldModels = process.env.HARA_ALLOWED_MODELS;
+  const oldDefault = process.env.HARA_DEFAULT_MODEL;
+  process.env.GATEWAY_ADAPTER = "litellm";
+  process.env.HARA_ALLOWED_MODELS = "deepseek-v4-flash,deepseek-v4-pro";
+  delete process.env.HARA_DEFAULT_MODEL;
+  try {
+    const prisma = {
+      device: {
+        findMany: async () => [{
+          id: "legacy-device",
+          name: "legacy test device",
+          person: null,
+          os: "darwin",
+          haraVersion: "0.120.0",
+          lastSeenAt: new Date("2026-09-03T00:00:00Z"),
+          tokens: [{
+            gatewayKeyId: "legacy-alias",
+            revokedAt: null,
+            expiresAt: null,
+            createdAt: new Date("2026-07-01T00:00:00Z"),
+            model: "glm-mock",
+            reasoningEffort: "",
+            budgetLimits: [],
+            rpmLimit: null,
+            tpmLimit: null,
+          }],
+        }],
+      },
+    };
+    const gateway = {
+      listSpend: async () => [{ keyId: "legacy-alias", spend: 0 }],
+    };
+    const service = new AdminService(prisma as never, {} as never, {} as never, gateway as never);
+    const row = (await service.fleet("org-1", new Date("2026-09-03T00:01:00Z")))[0];
+    assert.equal(row.token_active, true);
+    assert.equal(row.model, "glm-mock");
+    assert.equal(row.model_policy_status, "retired");
+    assert.deepEqual(row.available_models, []);
+    assert.equal(row.keys[0].key_id, "legacy-alias");
+  } finally {
+    if (oldAdapter === undefined) delete process.env.GATEWAY_ADAPTER;
+    else process.env.GATEWAY_ADAPTER = oldAdapter;
+    if (oldModels === undefined) delete process.env.HARA_ALLOWED_MODELS;
+    else process.env.HARA_ALLOWED_MODELS = oldModels;
+    if (oldDefault === undefined) delete process.env.HARA_DEFAULT_MODEL;
+    else process.env.HARA_DEFAULT_MODEL = oldDefault;
   }
 });

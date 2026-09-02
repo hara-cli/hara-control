@@ -2,6 +2,21 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.30 - 2026-09-03
+
+### Fixed
+
+- Keep Fleet and Usage available when a recorded device Key references a model that has since left the
+  deployment allow-list. The old model remains visible as a read-only historical identity and receives no
+  current selectable catalog; strict validation still rejects it for every new enrollment.
+- Mark a still-active Key on a retired model explicitly in the console instead of failing the entire
+  organization view, so other revoked Key records and their durable usage remain auditable.
+
+### Security
+
+- Update the `fast-uri` override to 3.1.7 so fresh production dependency resolution excludes the newly
+  disclosed vulnerable 3.1.5 release.
+
 ## 0.1.29 - 2026-09-02
 
 ### Added

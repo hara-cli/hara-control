@@ -151,3 +151,53 @@ test("admin usage includes revoked keys in historical breakdown but not active q
   assert.equal(report.breakdown[0].deviceId, "device-old");
   assert.deepEqual(report.quotas, []);
 });
+
+test("admin usage keeps quota history readable when an active key model left the catalog", async () => {
+  const oldAdapter = process.env.GATEWAY_ADAPTER;
+  const oldModels = process.env.HARA_ALLOWED_MODELS;
+  const oldDefault = process.env.HARA_DEFAULT_MODEL;
+  process.env.GATEWAY_ADAPTER = "litellm";
+  process.env.HARA_ALLOWED_MODELS = "deepseek-v4-flash,deepseek-v4-pro";
+  delete process.env.HARA_DEFAULT_MODEL;
+  try {
+    const prisma = {
+      device: {
+        findMany: async () => [{
+          id: "old-device",
+          name: "Old model device",
+          person: null,
+          lastSeenAt: new Date("2026-09-03T00:00:00Z"),
+          tokens: [{
+            gatewayKeyId: "old-alias",
+            model: "glm-mock",
+            createdAt: new Date("2026-07-01T00:00:00Z"),
+            expiresAt: null,
+            revokedAt: null,
+            budgetLimits: [{ window: "month", maxUsd: 10 }],
+            rpmLimit: null,
+            tpmLimit: null,
+          }],
+        }],
+      },
+    };
+    const gateway = {
+      usage: async () => ({
+        available: true,
+        buckets: [],
+        rolling: [{ keyId: "old-alias", spend5h: 0, spend7d: 0, spend30d: 1 }],
+      }),
+    };
+    const service = new AdminService(prisma as never, {} as never, {} as never, gateway as never);
+    const report = await service.usage("org-1", "30d", new Date("2026-09-03T00:01:00Z"));
+    assert.equal(report.quotas.length, 1);
+    assert.deepEqual(report.quotas[0].availableModels, []);
+    assert.equal(report.quotas[0].limits[0].usedUsd, 1);
+  } finally {
+    if (oldAdapter === undefined) delete process.env.GATEWAY_ADAPTER;
+    else process.env.GATEWAY_ADAPTER = oldAdapter;
+    if (oldModels === undefined) delete process.env.HARA_ALLOWED_MODELS;
+    else process.env.HARA_ALLOWED_MODELS = oldModels;
+    if (oldDefault === undefined) delete process.env.HARA_DEFAULT_MODEL;
+    else process.env.HARA_DEFAULT_MODEL = oldDefault;
+  }
+});

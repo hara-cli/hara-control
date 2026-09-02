@@ -7,6 +7,7 @@ import { GATEWAY_ADAPTER, GatewayAdapter } from "../gateway/gateway-adapter";
 import { randomId } from "../common/crypto";
 import {
   enrollmentManagedModels,
+  managedModelsForRecordedToken,
   resolveEnrollmentModel,
   resolveEnrollmentReasoningEffort,
 } from "../providers/model-policy";
@@ -193,6 +194,7 @@ export class AdminService {
     return devices.map((d) => {
       const active = d.tokens.find(tokenIsActive);
       const current = active ?? d.tokens[0];
+      const availableModels = active ? managedModelsForRecordedToken(active.model) : [];
       const keySpend = d.tokens.map((token) => spend.get(token.gatewayKeyId) ?? null);
       const spendAvailable = keySpend.length > 0 && keySpend.every((value) => value != null);
       return {
@@ -207,8 +209,9 @@ export class AdminService {
         online: now.getTime() - d.lastSeenAt.getTime() < ONLINE_WINDOW_MS,
         token_active: Boolean(active),
         model: current?.model ?? "",
+        model_policy_status: active ? (availableModels.length ? "active" : "retired") : "historical",
         reasoning_effort: current?.reasoningEffort || null,
-        available_models: active ? enrollmentManagedModels(active.model) : [],
+        available_models: availableModels,
         // Device-level spend is the sum of every historical key, including revoked keys. A missing
         // ledger value makes the aggregate unavailable rather than silently understating it.
         spend: spendAvailable ? keySpend.reduce<number>((sum, value) => sum + (value ?? 0), 0) : null,
@@ -416,7 +419,7 @@ export class AdminService {
         deviceName: device.name,
         principal: device.person?.name || device.person?.email || device.name,
         model: token.model,
-        availableModels: enrollmentManagedModels(token.model),
+        availableModels: managedModelsForRecordedToken(token.model),
         expiresAt: token.expiresAt,
         rpmLimit: token.rpmLimit,
         tpmLimit: token.tpmLimit,

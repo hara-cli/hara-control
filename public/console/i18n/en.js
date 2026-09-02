@@ -148,6 +148,7 @@
     "fleet.col.person": "Accountable person",
     "fleet.col.os": "OS",
     "fleet.col.model": "Model",
+    "fleet.model.retired": "Retired by current policy",
     "fleet.col.spend": "Spend",
     "fleet.col.keys": "Key records",
     "fleet.spend.unavailable": "Unavailable",

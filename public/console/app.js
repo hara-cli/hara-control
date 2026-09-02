@@ -815,7 +815,12 @@
                        <button type="button" class="btn-link fleet-bind-person" data-bind-person="${escapeHtml(d.device_id)}">${escapeHtml(I18N.t("fleet.person.bind"))}</button>`}
                 </td>
                 <td>${escapeHtml(d.os || "—")}</td>
-                <td>${escapeHtml(d.model || "—")}</td>
+                <td>
+                  <div>${escapeHtml(d.model || "—")}</div>
+                  ${d.model_policy_status === "retired"
+                    ? `<span class="pill pill--muted">${escapeHtml(I18N.t("fleet.model.retired"))}</span>`
+                    : ""}
+                </td>
                 <td class="num">${escapeHtml(formatSpend(d))}</td>
                 <td>${renderFleetKeys(d)}</td>
                 <td>

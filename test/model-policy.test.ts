@@ -5,6 +5,7 @@ import {
   canonicalManagedModelId,
   defaultManagedModel,
   enrollmentManagedModels,
+  managedModelsForRecordedToken,
   managedKeyAuthorizationModels,
   managedModelCapabilities,
   managedModelOptions,
@@ -121,6 +122,11 @@ test("formal enrollment rejects models outside the server allow-list", () => {
     HARA_ALLOWED_MODELS: "deepseek-v4-flash,deepseek-v4-pro",
   } as NodeJS.ProcessEnv;
   assert.throws(() => resolveEnrollmentModel("unmanaged-model", env), /not allowed/);
+  assert.deepEqual(managedModelsForRecordedToken("unmanaged-model", env), []);
+  assert.deepEqual(managedModelsForRecordedToken("deepseek-v4-flash", env), [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+  ]);
 });
 
 test("mock/dev enrollment keeps arbitrary model fixtures backward-compatible", () => {

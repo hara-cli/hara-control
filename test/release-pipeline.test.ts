@@ -24,6 +24,11 @@ const rdsDeploy = readFileSync(
   resolve("deploy/nanhara-tech/deploy-ai-rds.sh"),
   "utf8",
 );
+const selfHostEnvironmentExample = readFileSync(resolve(".env.example"), "utf8");
+const productionEnvironmentExample = readFileSync(
+  resolve("deploy/nanhara-tech/.env.prod.example"),
+  "utf8",
+);
 
 test("tag release deploys only after the verified multi-arch image through a protected environment", () => {
   assert.match(workflow, /deploy_production:\n\s+needs: image/);
@@ -108,4 +113,14 @@ test("RDS deploy proves a paid request records spend before restarting Control",
   assert.match(rdsDeploy, /scripts\/with-production-env\.mjs "\$APP_DIR\/\.env"/);
   assert.match(rdsDeploy, /for probe_model in deepseek-v4-flash deepseek-v4-pro deepseek-v4-flash-vision-exp/);
   assert.match(rdsDeploy, /HARA_PRICED_PROBE_MODEL="\$probe_model"/);
+});
+
+test("every tracked environment example exposes the managed DeepSeek visual route", () => {
+  for (const example of [selfHostEnvironmentExample, productionEnvironmentExample]) {
+    assert.match(
+      example,
+      /^HARA_ALLOWED_MODELS=deepseek-v4-flash,deepseek-v4-pro,deepseek-v4-flash-vision-exp$/m,
+    );
+    assert.match(example, /^HARA_DEFAULT_MODEL=deepseek-v4-flash$/m);
+  }
 });

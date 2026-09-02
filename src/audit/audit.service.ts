@@ -16,6 +16,18 @@ import { chainHash } from "../common/crypto";
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Prisma persists audit payloads as JSONB, whose wire format omits undefined object members.
+   * Hash the exact JSON shape that will be stored so a later database read reproduces the digest. */
+  private persistedPayload(payload: Record<string, unknown>): Prisma.InputJsonObject {
+    const serialized = JSON.stringify(payload);
+    if (serialized == null) throw new Error("audit payload must be JSON serializable");
+    const parsed = JSON.parse(serialized) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("audit payload must be a JSON object");
+    }
+    return parsed as Prisma.InputJsonObject;
+  }
+
   /** Canonical identity hashed into the chain — the fields a tamperer would want to rewrite. */
   private identity(row: {
     orgId: string;
@@ -49,14 +61,15 @@ export class AuditService {
     const seq = (prev?.seq ?? -1) + 1;
     const prevHash = prev?.rowHash ?? "";
     const at = new Date();
-    const rowHash = chainHash(this.identity({ orgId, action, actorType, actorId, payload, seq, at }), prevHash);
+    const storedPayload = this.persistedPayload(payload);
+    const rowHash = chainHash(this.identity({ orgId, action, actorType, actorId, payload: storedPayload, seq, at }), prevHash);
     await tx.auditLog.create({
       data: {
         orgId,
         action,
         actorType,
         actorId,
-        payload: payload as Prisma.InputJsonValue,
+        payload: storedPayload,
         at,
         seq,
         prevHash,
@@ -124,11 +137,14 @@ export class AuditService {
     count: number;
     /** Rows created before hash chaining existed. Preserved for history, but not claimed as anchored. */
     legacyPrefix: number;
+    /** Old enrollment rows whose hash included an undefined personId that JSONB then omitted. */
+    legacySerializationRows?: number;
     brokenAt?: { seq: number; id: string; reason: string };
   }> {
     const rows = await this.prisma.auditLog.findMany({ where: { orgId }, orderBy: { seq: "asc" } });
     let prevHash = "";
     let legacyPrefix = 0;
+    let legacySerializationRows = 0;
     let anchored = false;
     for (const r of rows) {
       if (!anchored && r.prevHash === "" && r.rowHash === "") {
@@ -144,20 +160,46 @@ export class AuditService {
           brokenAt: { seq: r.seq, id: r.id, reason: "prevHash linkage mismatch" },
         };
       }
-      const expected = chainHash(
-        this.identity({ orgId: r.orgId, action: r.action, actorType: r.actorType, actorId: r.actorId, payload: r.payload, seq: r.seq, at: r.at }),
-        prevHash,
-      );
-      if (expected !== r.rowHash) {
+      const identity = this.identity({
+        orgId: r.orgId,
+        action: r.action,
+        actorType: r.actorType,
+        actorId: r.actorId,
+        payload: r.payload,
+        seq: r.seq,
+        at: r.at,
+      });
+      const expected = chainHash(identity, prevHash);
+      const payload = r.payload;
+      const legacyEnrollmentIdentity =
+        r.action === "enroll_code.create" &&
+        payload != null &&
+        typeof payload === "object" &&
+        !Array.isArray(payload) &&
+        !Object.hasOwn(payload, "personId")
+          ? { ...identity, payload: { ...payload, personId: null } }
+          : null;
+      const matchesLegacySerialization =
+        expected !== r.rowHash &&
+        legacyEnrollmentIdentity != null &&
+        chainHash(legacyEnrollmentIdentity, prevHash) === r.rowHash;
+      if (expected !== r.rowHash && !matchesLegacySerialization) {
         return {
           ok: false,
           count: rows.length,
           legacyPrefix,
+          ...(legacySerializationRows ? { legacySerializationRows } : {}),
           brokenAt: { seq: r.seq, id: r.id, reason: "rowHash mismatch (row tampered)" },
         };
       }
+      if (matchesLegacySerialization) legacySerializationRows += 1;
       prevHash = r.rowHash;
     }
-    return { ok: true, count: rows.length, legacyPrefix };
+    return {
+      ok: true,
+      count: rows.length,
+      legacyPrefix,
+      ...(legacySerializationRows ? { legacySerializationRows } : {}),
+    };
   }
 }

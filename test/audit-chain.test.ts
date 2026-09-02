@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AuditService } from "../src/audit/audit.service";
+import { chainHash } from "../src/common/crypto";
 import type { PrismaService } from "../src/prisma/prisma.service";
 
 type Row = { id: string; orgId: string; action: string; actorType: string; actorId: string; payload: unknown; at: Date; seq: number; prevHash: string; rowHash: string };
@@ -118,6 +119,57 @@ test("audit chain: preserves and reports an unauthenticated legacy prefix before
   assert.equal(p.rows[2].seq, 2);
   assert.equal(p.rows[2].prevHash, "");
   assert.notEqual(p.rows[2].rowHash, "");
+});
+
+test("audit chain: hashes the exact JSON object Prisma persists", async () => {
+  const p = fakePrisma();
+  const svc = svcFor(p);
+  await svc.log("o1", "enroll_code.create", "admin", "a1", {
+    model: "deepseek-v4-flash",
+    ttlMinutes: 60,
+    personId: undefined,
+  });
+
+  assert.deepEqual(p.rows[0].payload, { model: "deepseek-v4-flash", ttlMinutes: 60 });
+  assert.deepEqual(await svc.verify("o1"), { ok: true, count: 1, legacyPrefix: 0 });
+});
+
+test("audit chain: verifies the known legacy enrollment serialization without rewriting history", async () => {
+  const p = fakePrisma();
+  const at = new Date("2026-07-21T13:58:42.399Z");
+  const storedPayload = { model: "deepseek-v4-flash", ttlMinutes: 60 };
+  const legacyHashedPayload = { ...storedPayload, personId: undefined };
+  p.rows.push({
+    id: "legacy-serialization",
+    orgId: "o1",
+    action: "enroll_code.create",
+    actorType: "admin",
+    actorId: "",
+    payload: storedPayload,
+    at,
+    seq: 0,
+    prevHash: "",
+    rowHash: chainHash({
+      orgId: "o1",
+      action: "enroll_code.create",
+      actorType: "admin",
+      actorId: "",
+      payload: legacyHashedPayload,
+      seq: 0,
+      at: at.toISOString(),
+    }, ""),
+  });
+
+  assert.deepEqual(await svcFor(p).verify("o1"), {
+    ok: true,
+    count: 1,
+    legacyPrefix: 0,
+    legacySerializationRows: 1,
+  });
+  p.rows[0].payload = { model: "rewritten", ttlMinutes: 60 };
+  const tampered = await svcFor(p).verify("o1");
+  assert.equal(tampered.ok, false);
+  assert.equal(tampered.brokenAt?.seq, 0);
 });
 
 test("audit chain: append uses serializable isolation and retries a bounded write conflict", async () => {

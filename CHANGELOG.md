@@ -2,6 +2,15 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.31 - 2026-09-03
+
+### Fixed
+
+- Hash the exact JSON form persisted to the audit log, so optional `undefined` object members omitted by
+  Prisma cannot make a newly written audit record fail its own later integrity check.
+- Verify historical `enroll_code.create` records using their known pre-fix serialization semantics and
+  report the compatibility count without rewriting any historical row or weakening checks for other actions.
+
 ## 0.1.30 - 2026-09-03
 
 ### Fixed

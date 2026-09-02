@@ -753,7 +753,11 @@
     const filtered = lastFleetRows.filter((d) => {
       if (fleetFilter.onlineOnly && !d.online) return false;
       if (fleetFilter.search && !(String(d.name || "").toLowerCase().includes(fleetFilter.search))) return false;
-      if (fleetFilter.model && !(String(d.model || "").toLowerCase().includes(fleetFilter.model))) return false;
+      if (fleetFilter.model) {
+        const models = [d.model, ...(Array.isArray(d.keys) ? d.keys.map((key) => key.model) : [])]
+          .map((model) => String(model || "").toLowerCase());
+        if (!models.some((model) => model.includes(fleetFilter.model))) return false;
+      }
       return true;
     });
     if (!filtered.length) {
@@ -770,6 +774,7 @@
               <th>${escapeHtml(I18N.t("fleet.col.os"))}</th>
               <th>${escapeHtml(I18N.t("fleet.col.model"))}</th>
               <th class="num">${escapeHtml(I18N.t("fleet.col.spend"))}</th>
+              <th>${escapeHtml(I18N.t("fleet.col.keys"))}</th>
               <th>${escapeHtml(I18N.t("fleet.col.policy"))}</th>
               <th>${escapeHtml(I18N.t("fleet.col.id"))}</th>
               <th></th>
@@ -783,6 +788,7 @@
                 <td>${escapeHtml(d.os || "—")}</td>
                 <td>${escapeHtml(d.model || "—")}</td>
                 <td class="num">${escapeHtml(formatSpend(d))}</td>
+                <td>${renderFleetKeys(d)}</td>
                 <td>
                   <div>${escapeHtml(d.expires_at
                     ? I18N.t("fleet.policy.expires", { date: formatDateTime(d.expires_at) })
@@ -829,6 +835,38 @@
         if (await copyText(b.getAttribute("data-copy"))) toast(I18N.t("common.copied"), "ok");
       });
     });
+  }
+
+  function renderFleetKeys(device) {
+    const keys = Array.isArray(device?.keys) ? device.keys : [];
+    if (!keys.length) return `<span class="small">${escapeHtml(I18N.t("fleet.keys.none"))}</span>`;
+    const statusLabel = (status) => I18N.t(`fleet.key.status.${status === "active" || status === "expired" ? status : "revoked"}`);
+    return `<details class="fleet-key-history"${device.token_active ? "" : " open"}>
+      <summary>${escapeHtml(I18N.t("fleet.keys.count", { n: keys.length }))}</summary>
+      <div class="fleet-key-history__list">${keys.map((key) => {
+        const lifecycle = key.status === "revoked" && key.revoked_at
+          ? I18N.t("fleet.key.revoked_at", { date: formatDateTime(key.revoked_at) })
+          : key.expires_at
+            ? I18N.t("fleet.key.expires", { date: formatDateTime(key.expires_at) })
+            : I18N.t("fleet.key.no_expiry");
+        return `<div class="fleet-key-record">
+          <div class="fleet-key-record__head">
+            <span class="pill pill--muted">${escapeHtml(statusLabel(key.status))}</span>
+            <span class="mono">${escapeHtml(key.model || "—")}</span>
+          </div>
+          <div class="small">${escapeHtml(I18N.t("fleet.key.created", { date: formatDateTime(key.created_at) }))}</div>
+          <div class="small">${escapeHtml(lifecycle)}</div>
+          <div class="small">${escapeHtml(I18N.t("fleet.key.spend", { spend: formatSpend(key) }))}</div>
+          <div class="id-cell" title="${escapeHtml(key.key_id || "")}">
+            <span class="small mono">${escapeHtml(truncateMid(key.key_id || ""))}</span>
+            <button type="button" class="btn-icon id-cell__copy" data-copy="${escapeHtml(key.key_id || "")}"
+                    title="${escapeHtml(I18N.t("fleet.key.copy_id"))}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+            </button>
+          </div>
+        </div>`;
+      }).join("")}</div>
+    </details>`;
   }
 
   // ╔═══════════════════════════════════════════════════════════════════╗

@@ -87,11 +87,33 @@ test("LiteLLM usage queries aliases parametrically and returns only safe aggrega
     assert.doesNotMatch(query.sql, /messages|response|requester_ip_address/);
     assert.equal(query.values.some((value) => value instanceof Date), false);
     assert.match(query.sql, /::timestamptz AT TIME ZONE 'UTC'/);
+    assert.match(query.sql, /"DeviceToken"/);
+    assert.match(query.sql, /"tokenHash"/);
+    assert.doesNotMatch(query.sql, /LiteLLM_VerificationToken/);
   }
   const boundaryValues = captured.flatMap((query) => query.values).filter((value) =>
     typeof value === "string" && value.endsWith("Z"));
   assert.ok(boundaryValues.includes("2026-07-23T07:00:00.000Z"), "5-hour UTC boundary must remain an instant");
   assert.ok(boundaryValues.includes("2026-07-23T13:00:00.000Z"), "range end must remain UTC");
+});
+
+test("lifetime spend joins the durable Hara key registry so revoked keys remain visible", async () => {
+  let captured: { sql: string; values: unknown[] } | undefined;
+  const adapter = new LiteLLMAdapter({
+    $queryRaw: async (query: { sql: string; values: unknown[] }) => {
+      captured = query;
+      return [{ keyId: "revoked-alias", spend: 1.25 }];
+    },
+  } as never);
+  assert.deepEqual(await adapter.listSpend(["revoked-alias"]), [{ keyId: "revoked-alias", spend: 1.25 }]);
+  assert.ok(captured);
+  assert.match(captured.sql, /"DeviceToken"/);
+  assert.match(captured.sql, /"gatewayKeyId"/);
+  assert.match(captured.sql, /"tokenHash"/);
+  assert.match(captured.sql, /LiteLLM_SpendLogs/);
+  assert.doesNotMatch(captured.sql, /LiteLLM_VerificationToken/);
+  assert.equal(captured.values.includes("revoked-alias"), true);
+  assert.doesNotMatch(captured.sql, /revoked-alias/);
 });
 
 test("LiteLLM usage marks the ledger unavailable instead of returning false zeroes", async () => {

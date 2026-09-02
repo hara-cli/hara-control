@@ -381,14 +381,18 @@ export class LiteLLMAdapter implements GatewayAdapter {
   async listSpend(keyIds: string[]): Promise<SpendRecord[]> {
     if (!keyIds.length) return [];
     try {
-      // LiteLLM 1.92 exposes GET /key/info only by raw virtual key, which Hara deliberately never
-      // stores. Production shares the same PostgreSQL database, so query the isolated LiteLLM schema
-      // by our non-secret device alias instead. Prisma.sql keeps every alias parameterized.
+      // LiteLLM deletes its VerificationToken row when a key is revoked. Hara deliberately keeps the
+      // one-way token hash and non-secret gateway alias in DeviceToken, so use that durable registry to
+      // retain lifetime spend visibility without restoring (or even possessing) the raw credential.
+      // Prisma.sql keeps every alias parameterized.
       const rows = await this.prisma.$queryRaw<Array<{ keyId: unknown; spend: unknown }>>(
         Prisma.sql`
-          SELECT "key_alias" AS "keyId", "spend"
-            FROM "litellm"."LiteLLM_VerificationToken"
-           WHERE "key_alias" IN (${Prisma.join(keyIds)})
+          SELECT t."gatewayKeyId" AS "keyId",
+                 COALESCE(SUM(l."spend"), 0)::double precision AS "spend"
+            FROM "DeviceToken" t
+            LEFT JOIN "litellm"."LiteLLM_SpendLogs" l ON l."api_key" = t."tokenHash"
+           WHERE t."gatewayKeyId" IN (${Prisma.join(keyIds)})
+           GROUP BY t."gatewayKeyId"
         `,
       );
       return normalizeLiteLLMSpendRows(keyIds, rows);
@@ -424,16 +428,16 @@ export class LiteLLMAdapter implements GatewayAdapter {
           lastRequestAt: unknown;
         }>>(
           Prisma.sql`
-            SELECT v."key_alias" AS "keyId",
+            SELECT t."gatewayKeyId" AS "keyId",
                    ${bucketExpression} AS "bucketAt",
                    COALESCE(NULLIF(l."model_group", ''), NULLIF(l."model", ''), '') AS "model",
                    COALESCE(SUM(l."spend"), 0)::double precision AS "spend",
                    COALESCE(SUM(l."total_tokens"), 0)::double precision AS "totalTokens",
                    COUNT(l."request_id")::int AS "requests",
                    MAX(l."endTime") AS "lastRequestAt"
-              FROM "litellm"."LiteLLM_VerificationToken" v
-             JOIN "litellm"."LiteLLM_SpendLogs" l ON l."api_key" = v."token"
-             WHERE v."key_alias" IN (${Prisma.join(keyIds)})
+              FROM "DeviceToken" t
+              JOIN "litellm"."LiteLLM_SpendLogs" l ON l."api_key" = t."tokenHash"
+             WHERE t."gatewayKeyId" IN (${Prisma.join(keyIds)})
                AND l."endTime" >= (${fromUtc})
                AND l."endTime" < (${toUtc})
              GROUP BY 1, 2, 3
@@ -447,17 +451,17 @@ export class LiteLLMAdapter implements GatewayAdapter {
           spend30d: unknown;
         }>>(
           Prisma.sql`
-            SELECT v."key_alias" AS "keyId",
+            SELECT t."gatewayKeyId" AS "keyId",
                    COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= (${fiveHoursAgoUtc})), 0)::double precision AS "spend5h",
                    COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= (${sevenDaysAgoUtc})), 0)::double precision AS "spend7d",
                    COALESCE(SUM(l."spend") FILTER (WHERE l."endTime" >= (${thirtyDaysAgoUtc})), 0)::double precision AS "spend30d"
-              FROM "litellm"."LiteLLM_VerificationToken" v
+              FROM "DeviceToken" t
               LEFT JOIN "litellm"."LiteLLM_SpendLogs" l
-                ON l."api_key" = v."token"
+                ON l."api_key" = t."tokenHash"
                AND l."endTime" >= (${thirtyDaysAgoUtc})
                AND l."endTime" < (${toUtc})
-             WHERE v."key_alias" IN (${Prisma.join(keyIds)})
-             GROUP BY v."key_alias"
+             WHERE t."gatewayKeyId" IN (${Prisma.join(keyIds)})
+             GROUP BY t."gatewayKeyId"
           `,
         ),
       ]);

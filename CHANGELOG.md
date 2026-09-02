@@ -2,6 +2,22 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.28 - 2026-09-02
+
+### Fixed
+
+- Preserve historical usage after an internal Key is revoked. Usage and lifetime spend now join LiteLLM's
+  append-only spend ledger through Hara's durable one-way token hash instead of the live-key table that
+  LiteLLM deletes during revocation.
+- Keep every revoked or expired Key visible as a non-secret fleet record with its model, lifecycle dates,
+  cumulative spend, and explicit state. This restores auditability without recovering or reactivating a
+  credential.
+
+### Security
+
+- Continue to delete revoked credentials from the gateway authorization path. Only the Hara registry row,
+  irreversible token hash, non-secret record ID, policy metadata, and aggregate usage remain queryable.
+
 ## 0.1.25 - 2026-08-26
 
 ### Added

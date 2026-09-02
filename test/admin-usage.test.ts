@@ -104,3 +104,50 @@ test("admin usage preserves unavailable ledger state while still returning confi
   assert.deepEqual(report.series, []);
   assert.equal(report.quotas[0].limits[0].usedUsd, null);
 });
+
+test("admin usage includes revoked keys in historical breakdown but not active quota runway", async () => {
+  const now = new Date("2026-09-02T12:00:00Z");
+  const prisma = {
+    device: {
+      findMany: async () => [{
+        id: "device-old",
+        name: "Former key",
+        lastSeenAt: new Date("2026-09-01T12:00:00Z"),
+        person: { name: "同事", email: "member@example.test" },
+        tokens: [{
+          gatewayKeyId: "revoked-alias",
+          model: "deepseek-v4-flash",
+          createdAt: new Date("2026-09-01T00:00:00Z"),
+          expiresAt: null,
+          revokedAt: new Date("2026-09-02T00:00:00Z"),
+          budgetLimits: [{ window: "month", maxUsd: 100 }],
+          rpmLimit: null,
+          tpmLimit: null,
+        }],
+      }],
+    },
+  };
+  const gateway = {
+    usage: async (keyIds: string[]) => {
+      assert.deepEqual(keyIds, ["revoked-alias"]);
+      return {
+        available: true,
+        buckets: [{
+          keyId: "revoked-alias",
+          bucketAt: new Date("2026-09-02T10:00:00Z"),
+          model: "deepseek-v4-flash",
+          spend: 0.4,
+          totalTokens: 900,
+          requests: 2,
+          lastRequestAt: new Date("2026-09-02T10:30:00Z"),
+        }],
+        rolling: [{ keyId: "revoked-alias", spend5h: 0.4, spend7d: 0.4, spend30d: 0.4 }],
+      };
+    },
+  };
+  const service = new AdminService(prisma as never, {} as never, {} as never, gateway as never);
+  const report = await service.usage("org-1", "24h", now);
+  assert.equal(report.totals.spend, 0.4);
+  assert.equal(report.breakdown[0].deviceId, "device-old");
+  assert.deepEqual(report.quotas, []);
+});

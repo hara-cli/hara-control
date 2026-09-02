@@ -665,6 +665,30 @@ code, pre, .mono { font-family: var(--font-mono); }
 .pill--role-ADMIN { color: var(--text); border-color: var(--border-strong); }
 .pill--role-MEMBER { color: var(--muted); }
 
+.fleet-key-history { min-width: 190px; }
+.fleet-key-history > summary {
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.fleet-key-history__list { display: grid; gap: 8px; margin-top: 8px; }
+.fleet-key-record {
+  min-width: 210px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+.fleet-key-record__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 5px;
+}
+.fleet-key-record .id-cell { margin-top: 3px; }
+
 /* ── KPI card (overview) ──────────────────────────────────────────── */
 .kpi {
   background: var(--panel);

@@ -180,16 +180,19 @@ export class AdminService {
   async fleet(orgId: string, now = new Date()) {
     const devices = await this.prisma.device.findMany({
       where: { orgId },
-      include: { tokens: true },
+      include: { tokens: { orderBy: { createdAt: "desc" } } },
       orderBy: { lastSeenAt: "desc" },
     });
     const tokenIsActive = (token: (typeof devices)[number]["tokens"][number]) =>
       !token.revokedAt && (!token.expiresAt || token.expiresAt.getTime() > now.getTime());
-    const activeKeyIds = devices.flatMap((d) => d.tokens.filter(tokenIsActive).map((t) => t.gatewayKeyId));
-    const spend = new Map((await this.gateway.listSpend(activeKeyIds)).map((s) => [s.keyId, s.spend]));
+    const keyIds = devices.flatMap((d) => d.tokens.map((t) => t.gatewayKeyId));
+    const spend = new Map((await this.gateway.listSpend(keyIds)).map((s) => [s.keyId, s.spend]));
 
     return devices.map((d) => {
       const active = d.tokens.find(tokenIsActive);
+      const current = active ?? d.tokens[0];
+      const keySpend = d.tokens.map((token) => spend.get(token.gatewayKeyId) ?? null);
+      const spendAvailable = keySpend.length > 0 && keySpend.every((value) => value != null);
       return {
         device_id: d.id,
         name: d.name,
@@ -198,15 +201,35 @@ export class AdminService {
         last_seen_at: d.lastSeenAt,
         online: now.getTime() - d.lastSeenAt.getTime() < ONLINE_WINDOW_MS,
         token_active: Boolean(active),
-        model: active?.model ?? "",
-        reasoning_effort: active?.reasoningEffort || null,
+        model: current?.model ?? "",
+        reasoning_effort: current?.reasoningEffort || null,
         available_models: active ? enrollmentManagedModels(active.model) : [],
-        spend: active ? (spend.get(active.gatewayKeyId) ?? null) : null,
-        spend_available: active ? spend.get(active.gatewayKeyId) != null : false,
-        expires_at: active?.expiresAt ?? null,
-        budget_limits: active?.budgetLimits ?? [],
-        rpm_limit: active?.rpmLimit ?? null,
-        tpm_limit: active?.tpmLimit ?? null,
+        // Device-level spend is the sum of every historical key, including revoked keys. A missing
+        // ledger value makes the aggregate unavailable rather than silently understating it.
+        spend: spendAvailable ? keySpend.reduce<number>((sum, value) => sum + (value ?? 0), 0) : null,
+        spend_available: spendAvailable,
+        expires_at: current?.expiresAt ?? null,
+        budget_limits: current?.budgetLimits ?? [],
+        rpm_limit: current?.rpmLimit ?? null,
+        tpm_limit: current?.tpmLimit ?? null,
+        keys: d.tokens.map((token) => ({
+          key_id: token.gatewayKeyId,
+          model: token.model,
+          reasoning_effort: token.reasoningEffort || null,
+          status: token.revokedAt
+            ? "revoked"
+            : token.expiresAt && token.expiresAt.getTime() <= now.getTime()
+              ? "expired"
+              : "active",
+          created_at: token.createdAt,
+          expires_at: token.expiresAt,
+          revoked_at: token.revokedAt,
+          spend: spend.get(token.gatewayKeyId) ?? null,
+          spend_available: spend.get(token.gatewayKeyId) != null,
+          budget_limits: token.budgetLimits,
+          rpm_limit: token.rpmLimit,
+          tpm_limit: token.tpmLimit,
+        })),
       };
     });
   }

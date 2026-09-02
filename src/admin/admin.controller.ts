@@ -1,8 +1,8 @@
-import { Body, Controller, ForbiddenException, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { AdminRole } from "@prisma/client";
 import { AdminService } from "./admin.service";
 import { AdminAuthGuard, assertAdminOrgAccess, AuthedUser } from "../common/admin-auth.guard";
-import { CreateEnrollCodeDto, CreateOrgDto } from "../protocol/dto";
+import { BindDevicePersonDto, CreateEnrollCodeDto, CreateOrgDto } from "../protocol/dto";
 import {
   defaultManagedModel,
   managedModelOptions,
@@ -95,6 +95,15 @@ export class AdminController {
   @Post("devices/:id/revoke")
   revoke(@Req() req: { user?: AuthedUser }, @Param("id") id: string) {
     return this.admin.revokeDevice(id, req.user!);
+  }
+
+  @Patch("devices/:id/person")
+  bindPerson(
+    @Req() req: { user?: AuthedUser },
+    @Param("id") id: string,
+    @Body() dto: BindDevicePersonDto,
+  ) {
+    return this.admin.bindDevicePerson(id, dto.personId, req.user!);
   }
 
   /** Verify the org's tamper-evident audit hash chain (compliance integrity check). */

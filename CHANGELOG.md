@@ -2,6 +2,20 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.29 - 2026-09-02
+
+### Added
+
+- Require every newly issued company Key to reference an organization Person, and expose an accountable
+  member picker/creator in the enrollment console.
+- Add an audited, tenant-checked one-time binding flow for legacy devices that were enrolled without a
+  person. The fleet now shows the bound person beside every historical Key record.
+
+### Security
+
+- Make device identity immutable after its first person binding. Reassigning a device to another person
+  requires revocation and re-enrollment, preventing administrators from silently rewriting Key ownership.
+
 ## 0.1.28 - 2026-09-02
 
 ### Fixed

@@ -60,8 +60,13 @@ export async function run() {
   ok(r.ok, `create org -> ${r.status}`);
   const org = await r.json();
 
+  r = await adminReq("/admin/persons", { orgId: org.id, email: "probe@example.test", name: "Policy probe" });
+  ok(r.ok, `create person -> ${r.status}`);
+  const person = await r.json();
+
   r = await adminReq("/admin/enroll-codes", {
     orgId: org.id,
+    personId: person.id,
     model: "glm-mock",
     ...POLICY,
   });

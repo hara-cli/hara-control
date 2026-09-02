@@ -688,6 +688,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   margin-bottom: 5px;
 }
 .fleet-key-record .id-cell { margin-top: 3px; }
+.fleet-bind-person { display: block; margin-top: 6px; }
 
 /* ── KPI card (overview) ──────────────────────────────────────────── */
 .kpi {

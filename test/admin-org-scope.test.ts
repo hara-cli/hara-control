@@ -41,6 +41,7 @@ test("non-expiring enrollment is restricted to a global superadmin", () => {
   } as unknown as AdminService);
   const dto = {
     orgId: "org-1",
+    personId: "person-1",
     tokenNeverExpires: true,
   };
 
@@ -148,6 +149,93 @@ test("enrollment codes reject a Person owned by another organization before writ
   assert.equal(writes, 0);
 });
 
+test("enrollment codes require an accountable Person before any key can be issued", async () => {
+  let writes = 0;
+  const prisma = {
+    person: { findUnique: async () => null },
+    enrollCode: { create: async () => { writes += 1; return {}; } },
+  };
+  const service = new AdminService(
+    prisma as never,
+    {
+      transact: async (_action: string, _actorType: string, _actorId: string, mutation: (tx: unknown) => Promise<{ result: unknown }>) =>
+        (await mutation(prisma)).result,
+    } as never,
+    {} as never,
+    {} as never,
+  );
+  await assert.rejects(
+    () => service.createEnrollCode(
+      "org-a",
+      "",
+      undefined,
+      60,
+      "" as never,
+      { id: "admin-a", email: "admin-a@example.test", role: AdminRole.ADMIN, orgId: "org-a" },
+    ),
+    /personId is required/,
+  );
+  assert.equal(writes, 0);
+});
+
+test("a legacy unassigned device can be person-bound once with an atomic audit", async () => {
+  const audits: unknown[][] = [];
+  const writes: Array<Record<string, unknown>> = [];
+  const prisma = {
+    device: {
+      findUnique: async () => ({ id: "device-1", orgId: "org-a", personId: null, enrollCodeId: "code-1" }),
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => { writes.push(data); return { count: 1 }; },
+    },
+    person: {
+      findUnique: async () => ({ id: "person-1", orgId: "org-a", name: "Member", email: "member@example.test" }),
+    },
+    enrollCode: {
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => { writes.push(data); return { count: 1 }; },
+    },
+  };
+  const audit = {
+    transact: async (action: string, actorType: string, actorId: string, mutation: (tx: unknown) => Promise<any>) => {
+      const result = await mutation(prisma);
+      audits.push([action, actorType, actorId, result.orgId, result.payload]);
+      return result.result;
+    },
+  };
+  const service = new AdminService(prisma as never, audit as never, {} as never, {} as never);
+  const result = await service.bindDevicePerson(
+    "device-1",
+    "person-1",
+    { id: "admin-a", email: "admin-a@example.test", role: AdminRole.ADMIN, orgId: "org-a" },
+  );
+  assert.equal(result.person.id, "person-1");
+  assert.deepEqual(writes, [{ personId: "person-1" }, { personId: "person-1" }]);
+  assert.deepEqual(audits, [[
+    "device.person.bind",
+    "admin",
+    "admin-a",
+    "org-a",
+    { deviceId: "device-1", personId: "person-1" },
+  ]]);
+});
+
+test("device person binding rejects cross-tenant and already-bound reassignment", async () => {
+  let existingPersonId: string | null = null;
+  let personOrg = "org-b";
+  const prisma = {
+    device: {
+      findUnique: async () => ({ id: "device-1", orgId: "org-a", personId: existingPersonId, enrollCodeId: null }),
+    },
+    person: {
+      findUnique: async () => ({ id: "person-1", orgId: personOrg, name: "Member", email: "member@example.test" }),
+    },
+  };
+  const service = new AdminService(prisma as never, {} as never, {} as never, {} as never);
+  const actor = { id: "admin-a", email: "admin-a@example.test", role: AdminRole.ADMIN, orgId: "org-a" };
+  await assert.rejects(() => service.bindDevicePerson("device-1", "person-1", actor), /same organization/);
+  personOrg = "org-a";
+  existingPersonId = "person-other";
+  await assert.rejects(() => service.bindDevicePerson("device-1", "person-1", actor), /already bound/);
+});
+
 test("organization and enrollment bootstrap audits preserve the authenticated actor", async () => {
   const audits: unknown[][] = [];
   const prisma = {
@@ -158,6 +246,7 @@ test("organization and enrollment bootstrap audits preserve the authenticated ac
     enrollCode: {
       create: async ({ data }: { data: Record<string, unknown> }) => ({ ...data, expiresAt: data.expiresAt }),
     },
+    person: { findUnique: async () => ({ orgId: "org-new" }) },
   };
   const service = new AdminService(
     prisma as never,
@@ -182,7 +271,7 @@ test("organization and enrollment bootstrap audits preserve the authenticated ac
     role: AdminRole.SUPERADMIN,
   };
   await service.createOrg("New Org", actor);
-  await service.createEnrollCode("org-new", "", undefined, 60, undefined, actor);
+  await service.createEnrollCode("org-new", "", undefined, 60, "person-1", actor);
   assert.deepEqual(
     audits.map((entry) => [entry[1], entry[2], entry[3]]),
     [

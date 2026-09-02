@@ -249,6 +249,7 @@
       if (!$("#fleet-orgid").value) $("#fleet-orgid").value = me.orgId;
       if (!$("#ec-orgid").value) $("#ec-orgid").value = me.orgId;
     }
+    if ($("#ec-orgid").value) loadEnrollPeople().catch(() => undefined);
   }
 
   async function getOrgChoices(force = false) {
@@ -706,7 +707,24 @@
   // ╚═══════════════════════════════════════════════════════════════════╝
   let lastFleetRows = null;
   let lastFleetOrgId = null;
+  let lastFleetPeople = [];
   let fleetFilter = { search: "", model: "", onlineOnly: false };
+  const peopleByOrg = new Map();
+
+  function personLabel(person) {
+    const name = String(person?.name || "").trim();
+    const email = String(person?.email || "").trim();
+    return name && email ? `${name} · ${email}` : name || email || String(person?.id || "");
+  }
+
+  async function loadPeople(orgId, force = false) {
+    if (!orgId) return [];
+    if (!force && peopleByOrg.has(orgId)) return peopleByOrg.get(orgId);
+    const rows = await api("GET", `/admin/persons?orgId=${encodeURIComponent(orgId)}`);
+    const people = Array.isArray(rows) ? rows : [];
+    peopleByOrg.set(orgId, people);
+    return people;
+  }
 
   $("#fleet-load").addEventListener("click", loadFleet);
 
@@ -734,8 +752,12 @@
       return;
     }
     try {
-      const rows = await api("GET", `/admin/fleet?orgId=${encodeURIComponent(orgId)}`);
+      const [rows, people] = await Promise.all([
+        api("GET", `/admin/fleet?orgId=${encodeURIComponent(orgId)}`),
+        loadPeople(orgId),
+      ]);
       lastFleetRows = Array.isArray(rows) ? rows : [];
+      lastFleetPeople = people;
       lastFleetOrgId = orgId;
       if (!lastFleetRows.length) {
         filterHost.classList.add("hidden");
@@ -771,6 +793,7 @@
             <tr>
               <th style="width: 18px;"></th>
               <th>${escapeHtml(I18N.t("fleet.col.name"))}</th>
+              <th>${escapeHtml(I18N.t("fleet.col.person"))}</th>
               <th>${escapeHtml(I18N.t("fleet.col.os"))}</th>
               <th>${escapeHtml(I18N.t("fleet.col.model"))}</th>
               <th class="num">${escapeHtml(I18N.t("fleet.col.spend"))}</th>
@@ -785,6 +808,12 @@
               <tr class="${d.online ? "row--online" : "row--offline"}">
                 <td></td>
                 <td>${escapeHtml(d.name || "—")}</td>
+                <td>
+                  ${d.person_id
+                    ? `<div>${escapeHtml(d.person_name || d.person_email || "—")}</div><div class="small">${escapeHtml(d.person_email || "")}</div>`
+                    : `<span class="pill pill--muted">${escapeHtml(I18N.t("fleet.person.unbound"))}</span>
+                       <button type="button" class="btn-link fleet-bind-person" data-bind-person="${escapeHtml(d.device_id)}">${escapeHtml(I18N.t("fleet.person.bind"))}</button>`}
+                </td>
                 <td>${escapeHtml(d.os || "—")}</td>
                 <td>${escapeHtml(d.model || "—")}</td>
                 <td class="num">${escapeHtml(formatSpend(d))}</td>
@@ -826,6 +855,38 @@
           toast(I18N.t("fleet.revoke.toast", { n: r.revoked }), "ok");
           loadFleet();
         } catch (e) { toast(e.message, "err"); }
+      });
+    });
+
+    wrap.querySelectorAll("button[data-bind-person]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!lastFleetPeople.length) {
+          toast(I18N.t("fleet.person.none"), "err");
+          return;
+        }
+        const deviceId = button.getAttribute("data-bind-person");
+        openModal({
+          title: I18N.t("fleet.person.bind.title"),
+          body: I18N.t("fleet.person.bind.body"),
+          fields: [{
+            label: I18N.t("enroll.person"),
+            type: "select",
+            value: lastFleetPeople[0]?.id || "",
+            options: lastFleetPeople.map((person) => ({ value: person.id, label: personLabel(person) })),
+          }],
+          primaryLabel: I18N.t("fleet.person.bind"),
+          onConfirm: async ([personId], close) => {
+            if (!personId) return;
+            try {
+              await api("PATCH", `/admin/devices/${encodeURIComponent(deviceId)}/person`, { personId });
+              close();
+              toast(I18N.t("fleet.person.bound"), "ok");
+              await loadFleet();
+            } catch (error) {
+              toast(error.message, "err");
+            }
+          },
+        });
       });
     });
 
@@ -1529,6 +1590,35 @@
   let managedModelCatalog = null;
   let managedModelCatalogPromise = null;
 
+  function refreshEnrollCreateState() {
+    const model = managedModelCatalog?.models?.find((entry) => entry.id === $("#ec-model").value);
+    $("#ec-create").disabled = !model || !$("#ec-person").value;
+  }
+
+  function paintEnrollPeople(people) {
+    const select = $("#ec-person");
+    const previous = select.value;
+    select.innerHTML = `<option value="">${escapeHtml(I18N.t("enroll.person.choose"))}</option>` +
+      people.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(personLabel(person))}</option>`).join("");
+    select.value = people.some((person) => person.id === previous) ? previous : "";
+    select.disabled = people.length === 0;
+    $("#ec-person-hint").textContent = people.length
+      ? I18N.t("enroll.person.hint")
+      : I18N.t("enroll.person.empty");
+    refreshEnrollCreateState();
+  }
+
+  async function loadEnrollPeople(force = false) {
+    const orgId = $("#ec-orgid").value.trim();
+    if (!orgId) return paintEnrollPeople([]);
+    try {
+      paintEnrollPeople(await loadPeople(orgId, force));
+    } catch (error) {
+      paintEnrollPeople([]);
+      $("#ec-person-hint").textContent = error.message;
+    }
+  }
+
   function modelOptionLabel(model) {
     const localized = I18N.t(`enroll.model.option.${model.tier}`);
     return localized.startsWith("enroll.model.option.")
@@ -1582,8 +1672,8 @@
     $("#ec-model-hint").textContent = active
       ? modelOptionDetail(active)
       : I18N.t("enroll.model.unavailable");
-    $("#ec-create").disabled = !active;
     paintManagedEfforts(active);
+    refreshEnrollCreateState();
   }
 
   async function loadManagedModelCatalog(force = false) {
@@ -1607,7 +1697,7 @@
           select.innerHTML = `<option value="">${escapeHtml(I18N.t("enroll.model.unavailable"))}</option>`;
           select.disabled = true;
           $("#ec-model-hint").textContent = error.message;
-          $("#ec-create").disabled = true;
+          refreshEnrollCreateState();
           throw error;
         })
         .finally(() => { managedModelCatalogPromise = null; });
@@ -1618,9 +1708,39 @@
   router.on("enroll", () => {
     getOrgChoices().catch(() => undefined);
     loadManagedModelCatalog().catch(() => undefined);
+    loadEnrollPeople().catch(() => undefined);
   });
 
   $("#ec-model").addEventListener("change", paintManagedModelCatalog);
+  $("#ec-person").addEventListener("change", refreshEnrollCreateState);
+  $("#ec-orgid").addEventListener("change", () => loadEnrollPeople());
+  $("#ec-orgid").addEventListener("blur", () => loadEnrollPeople());
+  $("#ec-person-new").addEventListener("click", () => {
+    const orgId = $("#ec-orgid").value.trim();
+    if (!orgId) return toast(I18N.t("err.orgid_required"), "err");
+    openModal({
+      title: I18N.t("enroll.person.new.title"),
+      body: I18N.t("enroll.person.new.body"),
+      fields: [
+        { label: I18N.t("enroll.person.new.name"), type: "text" },
+        { label: I18N.t("enroll.person.new.email"), type: "email" },
+      ],
+      primaryLabel: I18N.t("enroll.person.new.create"),
+      onConfirm: async ([name, email], close) => {
+        if (!email.trim()) return toast(I18N.t("enroll.person.new.email_required"), "err");
+        try {
+          const person = await api("POST", "/admin/persons", { orgId, name: name.trim(), email: email.trim() });
+          close();
+          await loadEnrollPeople(true);
+          $("#ec-person").value = person.id;
+          refreshEnrollCreateState();
+          toast(I18N.t("enroll.person.new.created"), "ok");
+        } catch (error) {
+          toast(error.message, "err");
+        }
+      },
+    });
+  });
 
   function readOptionalPositiveNumber(id, { integer = false, max }) {
     const raw = $(id).value.trim();
@@ -1680,10 +1800,12 @@
   $("#ec-create").addEventListener("click", async () => {
     const orgId = $("#ec-orgid").value.trim();
     const model = $("#ec-model").value.trim();
+    const personId = $("#ec-person").value.trim();
     const reasoningEffort = $("#ec-effort").value.trim();
     const gateway = $("#ec-gateway").value.trim().replace(/\/$/, "");
     if (!orgId) { toast(I18N.t("err.orgid_required"), "err"); return; }
     if (!model) { toast(I18N.t("err.model_required"), "err"); return; }
+    if (!personId) { toast(I18N.t("enroll.person.required"), "err"); return; }
     try {
       const tokenNeverExpires = me?.role === "SUPERADMIN" && $("#ec-never-expires").checked;
       const tokenDays = tokenNeverExpires
@@ -1701,6 +1823,7 @@
       const tpmLimit = readOptionalPositiveNumber("#ec-tpm", { integer: true, max: 1_000_000_000 });
       const r = await api("POST", "/admin/enroll-codes", {
         orgId,
+        personId,
         model,
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(tokenNeverExpires

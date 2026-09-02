@@ -305,6 +305,20 @@ export class RolesService {
     });
   }
 
+  listPersons(orgId: string) {
+    return this.prisma.person.findMany({
+      where: { orgId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        createdAt: true,
+        _count: { select: { devices: true } },
+      },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+    });
+  }
+
   async createTeam(orgId: string, name: string, actor: AuthedUser) {
     const auditActor = this.auditActor(actor);
     return this.audit.transact("team.create", auditActor.type, auditActor.id, async (tx) => {

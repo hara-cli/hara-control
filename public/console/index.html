@@ -678,6 +678,16 @@
               <input class="input input--mono" id="ec-orgid" type="text" list="org-options" data-i18n-placeholder="enroll.orgid.placeholder">
             </div>
             <div class="field">
+              <label class="field__label" for="ec-person" data-i18n="enroll.person">Accountable person</label>
+              <div class="row">
+                <select class="select" id="ec-person" disabled>
+                  <option value="" data-i18n="enroll.person.choose">Choose a member…</option>
+                </select>
+                <button type="button" class="btn-ghost row__fixed" id="ec-person-new" data-i18n="enroll.person.new">New member</button>
+              </div>
+              <div class="field__hint" id="ec-person-hint" data-i18n="enroll.person.hint">Every company Key must be attributable to a person before it can be issued.</div>
+            </div>
+            <div class="field">
               <label class="field__label" for="ec-model" data-i18n="enroll.model">Default model</label>
               <select class="select" id="ec-model" disabled>
                 <option value="" data-i18n="enroll.model.loading">Loading available models…</option>

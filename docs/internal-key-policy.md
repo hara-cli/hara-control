@@ -4,6 +4,8 @@ Hara Control issues a revocable LiteLLM virtual key when a colleague exchanges a
 code. Finite expiry remains the default. A SUPERADMIN may explicitly issue a non-expiring personal key;
 it remains model-scoped, budgeted, observable, and manually revocable. The raw virtual key is returned
 once to the device; Hara Control stores only its SHA-256 hash and the non-secret gateway key identifier.
+Every enrollment code must reference a `Person` in the same organization. A service account must likewise
+have an explicit Person record; device-name fallback is not an accountable identity.
 
 ## Supported limits
 
@@ -39,6 +41,7 @@ X-Admin-Key: <admin credential>
 
 {
   "orgId": "<organization id>",
+  "personId": "<organization person id>",
   "model": "deepseek-v4-flash",
   "tokenTtlMinutes": 43200,
   "budgetLimits": [
@@ -55,6 +58,10 @@ X-Admin-Key: <admin credential>
 resulting device key is authorized for the deployment's complete managed-model catalog, such as
 `deepseek-v4-flash`, `deepseek-v4-pro`, and `deepseek-v4-flash-vision-exp`. A user switches models inside
 the same CLI/Desktop connection without replacing the key.
+
+`personId` is mandatory and immutable after enrollment. The console lists organization members, can create
+a member before issuing a code, and can bind an older unassigned device exactly once. A device already bound
+to one person must be revoked and re-enrolled to change identity, preventing silent ownership rewrites.
 
 The response returns the one-time code, its exchange expiry, and the normalized `accessPolicy`. Treat the
 code as a credential: deliver it only to its intended colleague, never put it in chat logs, and let it be
@@ -77,8 +84,9 @@ device key created after redemption has no fixed expiry.
    restores the one-time code for a safe retry.
 5. The immutable policy is copied to `DeviceToken` and returned to the enrolling client. The fleet API and
    admin console show expiry and configured limits without revealing the token.
-6. Expired keys are excluded from the active fleet view. Explicit device revoke invalidates the key in both
-   the control plane and LiteLLM.
+6. Expired and revoked keys are excluded from authorization but retained in the fleet's historical Key
+   records with their model, lifecycle dates, policy, and cumulative usage. Explicit device revoke still
+   invalidates the key in both the control plane and LiteLLM.
 7. On an authenticated heartbeat, Control reconciles older single-model keys in place by private alias and
    returns the current authorized catalog. The raw device token never needs to be reissued or sent back.
    If that device was originally bound to a pre-V4 model alias, the alias remains authorized but hidden
@@ -87,10 +95,11 @@ device key created after redemption has no fixed expiry.
 ## Fleet spend integrity
 
 Hara never stores the raw LiteLLM virtual key after enrollment, so fleet usage must not call an endpoint
-that requires that raw key. In a formal LiteLLM deployment, usage collection reads only `key_alias` and
-`spend` from the isolated `litellm.LiteLLM_VerificationToken` table in the shared PostgreSQL database.
-Alias filters are parameterized, and neither the token column nor provider credentials are selected by
-usage queries. The separate in-place model-policy reconciliation path may read LiteLLM's one-way 64-hex
+that requires that raw key. LiteLLM deletes its live `VerificationToken` row during revocation, but its
+append-only spend ledger remains. Usage therefore joins `litellm.LiteLLM_SpendLogs.api_key` to Hara's
+durable `DeviceToken.tokenHash`, then returns only the non-secret `gatewayKeyId` and aggregates. Alias
+filters are parameterized, and neither raw tokens nor provider credentials are selected by usage queries.
+The separate in-place model-policy reconciliation path may read LiteLLM's one-way 64-hex
 token identifier for exactly one private alias and submit it to the master-authenticated internal
 `/key/update` endpoint; it never returns, logs, or copies that identifier into Hara storage.
 

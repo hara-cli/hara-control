@@ -50,7 +50,7 @@ const USAGE = `hara-control admin
   org create <name> [--type GROUP|COMPANY|DEPARTMENT|TEAM] [--parent id]   create an org unit (prints its id)
   org tree <orgId>                                        show a unit's ancestors + subtree ids
   fleet <orgId>                                           list devices (online · model · spend)
-  enroll <orgId> [--model m] [--person id] [--ttl min]    mint an enroll code + print the hara command
+  enroll <orgId> --person <personId> [--model m] [--ttl min]  mint an accountable enroll code
   revoke <deviceId>                                       revoke a device's token
   bundle <deviceId>                                       show the device's resolved role bundle
 env: HARA_CONTROL_URL (default http://localhost:4100) · HARA_CONTROL_ADMIN_KEY (or ./.env) · HARA_GATEWAY_URL`;
@@ -90,12 +90,12 @@ export async function main(argv: string[]): Promise<void> {
       break;
     }
     case "enroll": {
-      if (!rest[0]) return void console.error("usage: enroll <orgId> [--model m] [--person id] [--ttl min]");
+      const person = flag(rest, "person");
+      if (!rest[0] || !person) return void console.error("usage: enroll <orgId> --person <personId> [--model m] [--ttl min]");
       const body: any = { orgId: rest[0] };
       const model = flag(rest, "model");
       if (model) body.model = model;
-      const person = flag(rest, "person");
-      if (person) body.personId = person;
+      body.personId = person;
       const ttl = flag(rest, "ttl");
       if (ttl) body.ttlMinutes = Number(ttl);
       const { code, expiresAt } = await req("POST", "/admin/enroll-codes", body);

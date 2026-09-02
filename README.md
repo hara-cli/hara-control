@@ -204,7 +204,8 @@ Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database
   end-to-end (see [`phase0/`](./phase0/)).
 - **Phase 1 — MVP: ✅ implemented.** NestJS + Prisma + Postgres. Endpoints: `POST /v1/enroll`,
   `POST /v1/heartbeat` (device-facing, matches the CLI contract); `POST /admin/orgs`,
-  `GET /admin/model-options`, `POST /admin/enroll-codes`, `GET /admin/fleet`, `GET /admin/usage`,
+  `GET /admin/model-options`, `GET/POST /admin/persons`, `POST /admin/enroll-codes`,
+  `GET /admin/fleet`, `GET /admin/usage`, `PATCH /admin/devices/:id/person`,
   `POST /v1/learnings/candidates`, `GET /v1/learnings`, `GET /admin/learnings`,
   `POST /admin/learnings/:id/review`,
   `POST /admin/devices/:id/revoke`, plus organization-scoped service-binding list/configure/verify/
@@ -212,7 +213,8 @@ Connection-string shape: `postgresql://<user>:<password>@<host>:<port>/<database
   Device tokens are gateway virtual keys behind the `GatewayAdapter` seam (LiteLLM in prod, an
   in-process mock for dev/test); only token **hashes** are stored. Production includes readiness,
   atomic one-time enrollment, data-plane TTL/model scoping, encrypted DeepSeek source-of-truth and a
-  pinned LiteLLM runtime, enforced rolling spend limits, and organization-scoped usage charts.
+  pinned LiteLLM runtime, person-bound Key accountability, durable revoked-Key history, enforced rolling
+  spend limits, and organization-scoped usage charts.
   **Pending hardening:** non-owner/forced RLS, external KMS adapters, and signed audit checkpoints.
 
 ### Run Phase 1 locally

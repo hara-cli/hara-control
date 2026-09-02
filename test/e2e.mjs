@@ -24,7 +24,11 @@ const ok = (c, m) => { if (!c) throw new Error(`assertion failed: ${m}`); };
   const org = await r.json();
   ok(org.id, "org has id");
 
-  r = await adminReq("/admin/enroll-codes", { orgId: org.id, model: "glm-5" });
+  r = await adminReq("/admin/persons", { orgId: org.id, email: "dev@acme.com", name: "Dev" });
+  ok(r.ok, `create person -> ${r.status}`);
+  const person = await r.json();
+
+  r = await adminReq("/admin/enroll-codes", { orgId: org.id, model: "glm-5", personId: person.id });
   ok(r.ok, `create enroll-code -> ${r.status}`);
   const { code } = await r.json();
   ok(code, "got enroll code");
@@ -65,10 +69,6 @@ const ok = (c, m) => { if (!c) throw new Error(`assertion failed: ${m}`); };
   ok(r.status === 401, `admin guard blocks missing key -> 401 (got ${r.status})`);
 
   // ── B3: digital employees / role push-down ──────────────────────────────
-  r = await adminReq("/admin/persons", { orgId: org.id, email: "dev@acme.com", name: "Dev" });
-  ok(r.ok, `create person -> ${r.status}`);
-  const person = await r.json();
-
   r = await adminReq("/admin/roles", { orgId: org.id, key: "reviewer", model: "glm-5", system: "You review code.", owns: ["review"] });
   ok(r.ok, `create role -> ${r.status}`);
   const reviewerRole = await r.json();

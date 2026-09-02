@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { AdminRole, OrgUnitType, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
@@ -112,7 +112,7 @@ export class AdminService {
     model: string,
     baseUrl: string | undefined,
     ttlMinutes: number,
-    personId: string | undefined,
+    personId: string,
     actor: AuthedUser,
     options: AccessKeyPolicyInput & { reasoningEffort?: string } = {},
     now = new Date(),
@@ -134,15 +134,14 @@ export class AdminService {
       actor.viaSharedKey ? "shared-key" : "admin",
       actor.id,
       async (tx) => {
-        if (personId) {
-          const person = await tx.person.findUnique({
-            where: { id: personId },
-            select: { orgId: true },
-          });
-          if (!person) throw new BadRequestException("person not found");
-          if (person.orgId !== orgId) {
-            throw new BadRequestException("enrollment person must belong to the same organization");
-          }
+        if (!personId) throw new BadRequestException("personId is required for company key accountability");
+        const person = await tx.person.findUnique({
+          where: { id: personId },
+          select: { orgId: true },
+        });
+        if (!person) throw new BadRequestException("person not found");
+        if (person.orgId !== orgId) {
+          throw new BadRequestException("enrollment person must belong to the same organization");
         }
         const ec = await tx.enrollCode.create({
           data: {
@@ -151,7 +150,7 @@ export class AdminService {
             model: resolvedModel,
             reasoningEffort,
             baseUrl: baseUrl ?? null,
-            personId: personId ?? null,
+            personId,
             expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
             tokenTtlMinutes: accessPolicy.tokenTtlMinutes,
             tokenNeverExpires: accessPolicy.tokenNeverExpires,
@@ -180,7 +179,10 @@ export class AdminService {
   async fleet(orgId: string, now = new Date()) {
     const devices = await this.prisma.device.findMany({
       where: { orgId },
-      include: { tokens: { orderBy: { createdAt: "desc" } } },
+      include: {
+        person: { select: { id: true, name: true, email: true } },
+        tokens: { orderBy: { createdAt: "desc" } },
+      },
       orderBy: { lastSeenAt: "desc" },
     });
     const tokenIsActive = (token: (typeof devices)[number]["tokens"][number]) =>
@@ -196,6 +198,9 @@ export class AdminService {
       return {
         device_id: d.id,
         name: d.name,
+        person_id: d.person?.id ?? null,
+        person_name: d.person?.name || d.person?.email || null,
+        person_email: d.person?.email ?? null,
         os: d.os,
         hara_version: d.haraVersion,
         last_seen_at: d.lastSeenAt,
@@ -232,6 +237,53 @@ export class AdminService {
         })),
       };
     });
+  }
+
+  /** Bind one legacy unassigned device to an accountable person exactly once. Existing bindings are
+   * immutable: correcting a wrong identity requires revoking and issuing a new person-bound key. */
+  async bindDevicePerson(deviceId: string, personId: string, actor: AuthedUser) {
+    const [device, person] = await Promise.all([
+      this.prisma.device.findUnique({
+        where: { id: deviceId },
+        select: { id: true, orgId: true, personId: true, enrollCodeId: true },
+      }),
+      this.prisma.person.findUnique({
+        where: { id: personId },
+        select: { id: true, orgId: true, name: true, email: true },
+      }),
+    ]);
+    if (!device) throw new NotFoundException("device not found");
+    assertAdminOrgAccess(actor, device.orgId);
+    if (!person) throw new NotFoundException("person not found");
+    if (person.orgId !== device.orgId) throw new BadRequestException("person and device must belong to the same organization");
+    if (device.personId && device.personId !== personId) {
+      throw new BadRequestException("device identity is already bound; revoke and re-enroll to change people");
+    }
+    if (device.personId === personId) return { deviceId, person };
+
+    return this.audit.transact(
+      "device.person.bind",
+      actor.viaSharedKey ? "shared-key" : "admin",
+      actor.id,
+      async (tx) => {
+        const updated = await tx.device.updateMany({
+          where: { id: deviceId, orgId: device.orgId, personId: null },
+          data: { personId },
+        });
+        if (updated.count !== 1) throw new BadRequestException("device identity was bound concurrently; refresh and retry");
+        if (device.enrollCodeId) {
+          await tx.enrollCode.updateMany({
+            where: { id: device.enrollCodeId, orgId: device.orgId, personId: null },
+            data: { personId },
+          });
+        }
+        return {
+          result: { deviceId, person },
+          orgId: device.orgId,
+          payload: { deviceId, personId },
+        };
+      },
+    );
   }
 
   async usage(orgId: string, requestedRange?: string, now = new Date()) {

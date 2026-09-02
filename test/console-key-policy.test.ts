@@ -21,6 +21,8 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
     "enroll.policy.title",
     "enroll.model.loading",
     "enroll.model.hint",
+    "enroll.person",
+    "enroll.person.required",
     "enroll.model.option.flash",
     "enroll.model.option.pro",
     "enroll.model.option.vision",
@@ -56,6 +58,8 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
     "ec-never-expires",
     "ec-never-expires-wrap",
     "ec-model",
+    "ec-person",
+    "ec-person-new",
     "ec-model-hint",
     "ec-effort-wrap",
     "ec-effort",
@@ -77,10 +81,12 @@ test("console exposes the internal-key lifetime and all three enforced budget wi
 test("console JavaScript parses and sends the enforced policy fields to the enroll endpoint", () => {
   const app = readFileSync(join(root, "public", "console", "app.js"), "utf8");
   assert.doesNotThrow(() => new Function(app));
-  for (const field of ["reasoningEffort", "tokenTtlMinutes", "tokenNeverExpires", "budgetLimits", "rpmLimit", "tpmLimit"]) {
+  for (const field of ["personId", "reasoningEffort", "tokenTtlMinutes", "tokenNeverExpires", "budgetLimits", "rpmLimit", "tpmLimit"]) {
     assert.match(app, new RegExp(`\\b${field}\\b`));
   }
   assert.match(app, /\/admin\/enroll-codes/);
   assert.match(app, /\/admin\/model-options/);
   assert.match(app, /managedModelCatalog/);
+  assert.match(app, /\/admin\/persons/);
+  assert.match(app, /\/person`/);
 });

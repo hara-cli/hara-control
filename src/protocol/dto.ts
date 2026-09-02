@@ -78,6 +78,11 @@ export class CreateEnrollCodeDto {
   budgetLimits?: AccessBudgetLimitDto[];
   @IsInt() @Min(1) @Max(MAX_RPM_LIMIT) @IsOptional() rpmLimit?: number;
   @IsInt() @Min(1) @Max(MAX_TPM_LIMIT) @IsOptional() tpmLimit?: number;
-  // per-person enroll: bind the resulting device to this Person (inherits their digital employees)
-  @IsString() @IsOptional() personId?: string;
+  // Company credentials are always issued to an accountable Person. Service identities should be
+  // represented by an explicit Person record instead of falling back to an ambiguous device name.
+  @IsString() @IsNotEmpty() personId!: string;
+}
+
+export class BindDevicePersonDto {
+  @IsString() @IsNotEmpty() personId!: string;
 }

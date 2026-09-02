@@ -55,6 +55,12 @@ export class RolesController {
     return this.roles.createPerson(d.orgId, d.email, d.name, request.user!);
   }
 
+  @Get("persons")
+  listPersons(@Req() request: RequestWithUser, @Query("orgId") orgId: string) {
+    assertAdminOrgAccess(request.user!, orgId);
+    return this.roles.listPersons(orgId);
+  }
+
   @Post("teams")
   createTeam(@Req() request: RequestWithUser, @Body() d: CreateTeamDto) {
     assertAdminOrgAccess(request.user!, d.orgId);

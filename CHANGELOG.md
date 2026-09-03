@@ -2,6 +2,17 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.32 - 2026-09-03
+
+### Added
+
+- Route the OpenAI-compatible `/v1/responses` data-plane endpoint to LiteLLM alongside Chat,
+  Anthropic Messages, and model discovery. Company person-bound Keys can therefore use Codex without
+  bypassing the same usage ledger, budget, revocation, and accountability boundary used by Hara and
+  Claude Code.
+- Keep the production Nginx configuration and the self-hosted Nginx/Caddy examples under one regression
+  test so a future control-plane fallback cannot silently capture an inference protocol.
+
 ## 0.1.31 - 2026-09-03
 
 ### Fixed

@@ -162,7 +162,7 @@ return the model route, a separately scoped Desk credential, and redacted active
 
 1. **DNS:** A record `cp.example.com → <server IP>` (verify `dig +short cp.example.com`).
 2. **Reverse proxy** — must split control vs chat (device token authenticates at *both*):
-   - `/v1/chat*`, `/v1/messages`, `/v1/models` → **LiteLLM** `127.0.0.1:4000`
+   - `/v1/chat*`, `/v1/responses`, `/v1/messages`, `/v1/models` → **LiteLLM** `127.0.0.1:4000`
    - other `/v1/*` (enroll/heartbeat/roles) → **hara-control** `127.0.0.1:4100`
    - `/admin/*` → hara-control **locked to localhost / your IP** (never public)
    - copy `deploy/examples/nginx-control-plane.conf` (nginx) or `deploy/examples/Caddyfile` (auto-TLS).

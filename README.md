@@ -66,7 +66,7 @@ Config knobs for the above are in [`.env.example`](./.env.example).
    private net (Tailscale)   │            │                  │     ▲     │
         └───────────────────▶│            ▼                  │     │     │
                              │  LiteLLM (Python sidecar) ────┴─────┘     │
-                             │   /v1/messages · routing · upstream keys  │
+                             │  Chat · Responses · Messages · upstreams │
                              └───────────────┬──────────────────────────┘
                                              ▼
                                cloud relay  /  internal self-hosted models

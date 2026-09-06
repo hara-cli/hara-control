@@ -30,7 +30,14 @@ export class MockGatewayAdapter implements GatewayAdapter {
   }
 
   async usage(): Promise<GatewayUsageReport> {
-    return { available: true, buckets: [], rolling: [] };
+    return {
+      kind: "payg-ledger",
+      source: "mock",
+      currency: "USD",
+      available: true,
+      buckets: [],
+      rolling: [],
+    };
   }
 
   async readiness(): Promise<GatewayReadiness> {

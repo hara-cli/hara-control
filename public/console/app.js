@@ -1430,10 +1430,33 @@
     $("#usage-total-requests").textContent = "—";
     $("#usage-latest").textContent = "—";
     $("#usage-updated").textContent = "—";
+    $("#usage-accounting").textContent = "";
+    $("#usage-accounting").classList.add("hidden");
     $("#usage-unavailable").classList.add("hidden");
+    $("#usage-payg-kpis").classList.remove("hidden");
+    $("#usage-payg-chart-card").classList.remove("hidden");
+    $("#usage-payg-breakdown-card").classList.remove("hidden");
+    $("#usage-native-card").classList.add("hidden");
+    $("#usage-native-allowance").innerHTML = "";
     $("#usage-chart").innerHTML = `<div class="empty">${escapeHtml(I18N.t("usage.empty.choose_org"))}</div>`;
     $("#usage-quotas").innerHTML = `<div class="empty empty--inline">${escapeHtml(I18N.t("usage.empty.choose_org"))}</div>`;
     $("#usage-breakdown").innerHTML = `<div class="empty empty--inline">${escapeHtml(I18N.t("usage.empty.choose_org"))}</div>`;
+  }
+
+  function renderUsageAccounting(accounting) {
+    const host = $("#usage-accounting");
+    if (!accounting || typeof accounting !== "object") {
+      host.textContent = "";
+      host.classList.add("hidden");
+      return;
+    }
+    const source = String(accounting.source || "—");
+    const unit = String(accounting.unit || "—");
+    host.textContent = I18N.t(
+      accounting.mode === "provider-native" ? "usage.accounting.provider" : "usage.accounting.gateway",
+      { source, unit },
+    );
+    host.classList.remove("hidden");
   }
 
   async function loadUsage() {
@@ -1454,17 +1477,100 @@
   }
 
   function renderUsage(report) {
-    const available = report && report.available === true;
+    const nativeMode = report?.accounting?.mode === "provider-native";
+    const available = !nativeMode && report && report.available === true;
+    const nativeAvailable = nativeMode && report?.nativeAllowance?.available === true;
     const totals = report && report.totals ? report.totals : {};
-    $("#usage-unavailable").classList.toggle("hidden", available);
+    const unavailable = nativeMode ? !nativeAvailable : !available;
+    $("#usage-unavailable").textContent = I18N.t(nativeMode ? "usage.native.unavailable" : "usage.unavailable");
+    $("#usage-unavailable").classList.toggle("hidden", !unavailable);
+    $("#usage-payg-kpis").classList.toggle("hidden", nativeMode);
+    $("#usage-payg-chart-card").classList.toggle("hidden", nativeMode);
+    $("#usage-payg-breakdown-card").classList.toggle("hidden", nativeMode);
+    $("#usage-native-card").classList.toggle("hidden", !nativeMode);
     $("#usage-total-spend").textContent = available ? formatMoney(totals.spend) : "—";
     $("#usage-total-tokens").textContent = available ? formatCount(totals.totalTokens) : "—";
     $("#usage-total-requests").textContent = available ? formatCount(totals.requests) : "—";
     $("#usage-latest").textContent = available ? formatDateTime(totals.latestRequestAt) : "—";
     $("#usage-updated").textContent = I18N.t("usage.updated", { time: formatDateTime(new Date()) });
+    renderUsageAccounting(report && report.accounting);
+    renderNativeAllowance(report && report.nativeAllowance, report && report.accounting);
     renderUsageChart(report);
     renderUsageQuotas(report && report.quotas);
     renderUsageBreakdown(report && report.breakdown, available);
+  }
+
+  function nativeMeterValue(value) {
+    if (value == null || value === "") return "—";
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value.toLocaleString(I18N.current, { maximumFractionDigits: 6 });
+    }
+    return String(value);
+  }
+
+  function nativeMeterPercent(meter) {
+    const used = Number(meter?.used);
+    const remaining = Number(meter?.remaining);
+    const limit = Number(meter?.limit);
+    if (!Number.isFinite(limit) || limit <= 0) return null;
+    if (Number.isFinite(used)) return Math.max(0, used / limit * 100);
+    if (Number.isFinite(remaining)) return Math.max(0, (limit - remaining) / limit * 100);
+    return null;
+  }
+
+  function renderNativeAllowance(nativeAllowance, accounting) {
+    const host = $("#usage-native-allowance");
+    $("#usage-native-source").textContent = String(accounting?.source || I18N.t("usage.native.authoritative"));
+    const meters = nativeAllowance?.available === true && Array.isArray(nativeAllowance.meters)
+      ? nativeAllowance.meters
+      : [];
+    if (!meters.length) {
+      host.innerHTML = `<div class="empty empty--inline">${escapeHtml(nativeAllowance?.available === false
+        ? I18N.t("usage.native.unavailable")
+        : I18N.t("usage.native.no_meters"))}</div>`;
+      return;
+    }
+    host.innerHTML = `<div class="usage-native-list">${meters.map((meter) => {
+      const percent = nativeMeterPercent(meter);
+      const barPercent = percent == null ? 0 : Math.min(100, percent);
+      const level = meter.availability === "exhausted" || (percent != null && percent >= 95)
+        ? " usage-meter__fill--critical"
+        : percent != null && percent >= 80 ? " usage-meter__fill--warn" : "";
+      const availability = ["available", "exhausted", "unknown"].includes(meter.availability)
+        ? meter.availability
+        : "unknown";
+      const value = meter.used != null || meter.limit != null
+        ? I18N.t("usage.native.value", {
+            used: nativeMeterValue(meter.used),
+            limit: nativeMeterValue(meter.limit),
+            unit: String(meter.unit || ""),
+          })
+        : I18N.t("usage.native.remaining", {
+            remaining: nativeMeterValue(meter.remaining),
+            unit: String(meter.unit || ""),
+          });
+      const metadata = [
+        meter.window ? I18N.t("usage.native.window", { window: String(meter.window) }) : "",
+        meter.resetAt ? I18N.t("usage.native.reset", { time: formatDateTime(meter.resetAt) }) : "",
+      ].filter(Boolean).map((entry) => `<span>${escapeHtml(entry)}</span>`).join("");
+      return `<article class="usage-quota">
+        <div class="usage-quota__identity">
+          <div class="usage-quota__name">${escapeHtml(meter.principal || meter.deviceName || "—")}</div>
+          <div class="usage-quota__meta">${escapeHtml(meter.deviceName || "—")} · ${escapeHtml(meter.model || "—")}</div>
+          <div class="usage-native-meta">${metadata}</div>
+        </div>
+        <div class="usage-quota__meters">
+          <div class="usage-meter">
+            <div class="usage-meter__head">
+              <span class="usage-meter__label">${escapeHtml(meter.label || meter.id || "—")}</span>
+              <span class="pill pill--muted usage-native-status usage-native-status--${availability}">${escapeHtml(I18N.t(`usage.native.status.${availability}`))}</span>
+            </div>
+            <div class="usage-meter__value">${escapeHtml(value)}</div>
+            ${percent == null ? "" : `<div class="usage-meter__track"><div class="usage-meter__fill${level}" style="width:${barPercent}%"></div></div>`}
+          </div>
+        </div>
+      </article>`;
+    }).join("")}</div>`;
   }
 
   function chartTimeLabel(value, range) {

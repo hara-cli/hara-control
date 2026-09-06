@@ -403,7 +403,14 @@ export class LiteLLMAdapter implements GatewayAdapter {
   }
 
   async usage(keyIds: string[], range: UsageRange, now = new Date()): Promise<GatewayUsageReport> {
-    if (!keyIds.length) return { available: true, buckets: [], rolling: [] };
+    if (!keyIds.length) return {
+      kind: "payg-ledger",
+      source: "litellm",
+      currency: "USD",
+      available: true,
+      buckets: [],
+      rolling: [],
+    };
     const window = usageWindow(range, now);
     const bucketExpression = window.bucketUnit === "hour"
       ? Prisma.sql`date_trunc('hour', l."endTime")`
@@ -466,13 +473,23 @@ export class LiteLLMAdapter implements GatewayAdapter {
         ),
       ]);
       return {
+        kind: "payg-ledger",
+        source: "litellm",
+        currency: "USD",
         available: true,
         buckets: normalizeLiteLLMUsageRows(bucketRows),
         rolling: normalizeLiteLLMRollingRows(rollingRows),
       };
     } catch {
       this.log.warn("LiteLLM usage ledger unavailable; admin usage will expose unavailable instead of fake zeroes");
-      return { available: false, buckets: [], rolling: [] };
+      return {
+        kind: "payg-ledger",
+        source: "litellm",
+        currency: "USD",
+        available: false,
+        buckets: [],
+        rolling: [],
+      };
     }
   }
 

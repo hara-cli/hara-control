@@ -30,6 +30,9 @@ test("admin usage aggregates time buckets, device/model breakdown, and rolling q
   };
   const gateway = {
     usage: async () => ({
+      kind: "payg-ledger",
+      source: "litellm",
+      currency: "USD",
       available: true,
       buckets: [{
         keyId: "alias-1",
@@ -47,6 +50,14 @@ test("admin usage aggregates time buckets, device/model breakdown, and rolling q
   const report = await service.usage("org-1", "24h", now);
 
   assert.equal(report.available, true);
+  assert.deepEqual(report.accounting, {
+    authority: "gateway",
+    mode: "payg-ledger",
+    source: "litellm",
+    unit: "USD",
+    haraMayInferBillingFromTransportTokens: false,
+  });
+  assert.equal(report.nativeAllowance, null);
   assert.deepEqual(report.totals, {
     spend: 0.25,
     totalTokens: 1200,
@@ -96,7 +107,14 @@ test("admin usage preserves unavailable ledger state while still returning confi
       }],
     },
   };
-  const gateway = { usage: async () => ({ available: false, buckets: [], rolling: [] }) };
+  const gateway = { usage: async () => ({
+    kind: "payg-ledger",
+    source: "litellm",
+    currency: "USD",
+    available: false,
+    buckets: [],
+    rolling: [],
+  }) };
   const service = new AdminService(prisma as never, {} as never, {} as never, gateway as never);
   const report = await service.usage("org-1", "7d");
   assert.equal(report.available, false);
@@ -131,6 +149,9 @@ test("admin usage includes revoked keys in historical breakdown but not active q
     usage: async (keyIds: string[]) => {
       assert.deepEqual(keyIds, ["revoked-alias"]);
       return {
+        kind: "payg-ledger",
+        source: "litellm",
+        currency: "USD",
         available: true,
         buckets: [{
           keyId: "revoked-alias",
@@ -182,6 +203,9 @@ test("admin usage keeps quota history readable when an active key model left the
     };
     const gateway = {
       usage: async () => ({
+        kind: "payg-ledger",
+        source: "litellm",
+        currency: "USD",
         available: true,
         buckets: [],
         rolling: [{ keyId: "old-alias", spend5h: 0, spend7d: 0, spend30d: 1 }],
@@ -200,4 +224,79 @@ test("admin usage keeps quota history readable when an active key model left the
     if (oldDefault === undefined) delete process.env.HARA_DEFAULT_MODEL;
     else process.env.HARA_DEFAULT_MODEL = oldDefault;
   }
+});
+
+test("admin usage preserves provider-native subscription meters without inventing USD quota progress", async () => {
+  const now = new Date("2026-09-06T12:00:00Z");
+  const prisma = {
+    device: {
+      findMany: async () => [{
+        id: "device-native",
+        name: "Subscription device",
+        lastSeenAt: now,
+        person: { name: "同事", email: "member@example.test" },
+        tokens: [{
+          gatewayKeyId: "native-alias",
+          model: "provider-model",
+          createdAt: now,
+          expiresAt: null,
+          revokedAt: null,
+          budgetLimits: [{ window: "month", maxUsd: 10 }],
+          rpmLimit: null,
+          tpmLimit: null,
+        }],
+      }],
+    },
+  };
+  const gateway = {
+    usage: async () => ({
+      kind: "provider-native",
+      provider: "vendor-plan",
+      available: true,
+      authoritative: true,
+      fetchedAt: new Date("2026-09-06T11:59:00Z"),
+      validUntil: new Date("2026-09-06T12:04:00Z"),
+      meters: [
+        {
+          keyId: "native-alias",
+          id: "rolling-allowance",
+          label: "Plan requests",
+          unit: "vendor-request",
+          availability: "available",
+          used: 40,
+          remaining: 60,
+          limit: 100,
+          window: "provider-window",
+        },
+        {
+          keyId: "other-organization-alias",
+          id: "must-not-leak",
+          label: "Other tenant",
+          unit: "vendor-request",
+          availability: "available",
+        },
+      ],
+    }),
+  };
+
+  const service = new AdminService(prisma as never, {} as never, {} as never, gateway as never);
+  const report = await service.usage("org-1", "24h", now);
+
+  assert.equal(report.available, false, "legacy PAYG spend remains unavailable for a native subscription report");
+  assert.equal(report.totals.spend, null);
+  assert.deepEqual(report.accounting, {
+    authority: "provider",
+    mode: "provider-native",
+    source: "vendor-plan",
+    unit: "provider-defined",
+    authoritative: true,
+    fetchedAt: new Date("2026-09-06T11:59:00Z"),
+    validUntil: new Date("2026-09-06T12:04:00Z"),
+    haraMayInferBillingFromTransportTokens: false,
+  });
+  assert.deepEqual(report.nativeAllowance?.meters.map((meter) => meter.deviceId), ["device-native"]);
+  assert.equal("keyId" in report.nativeAllowance!.meters[0], false, "private gateway aliases stay server-side");
+  assert.equal(report.nativeAllowance?.meters[0].remaining, 60);
+  assert.equal(report.quotas[0].limits[0].usedUsd, null,
+    "a native request allowance cannot be converted into a USD organization-policy meter");
 });

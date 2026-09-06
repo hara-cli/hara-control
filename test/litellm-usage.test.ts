@@ -77,7 +77,9 @@ test("LiteLLM usage queries aliases parametrically and returns only safe aggrega
     },
   } as never);
   const result = await adapter.usage(["alias-1"], "24h", new Date("2026-07-23T12:00:00Z"));
+  if (result.kind !== "payg-ledger") assert.fail("LiteLLM must identify its PAYG ledger accounting mode");
   assert.equal(result.available, true);
+  assert.equal(result.currency, "USD");
   assert.equal(result.buckets.length, 1);
   assert.equal(result.rolling[0].spend5h, 0.001);
   assert.equal(captured.length, 2);
@@ -125,6 +127,13 @@ test("LiteLLM usage marks the ledger unavailable instead of returning false zero
   (adapter as any).log = { warn() {} };
   assert.deepEqual(
     await adapter.usage(["alias-1"], "7d", new Date("2026-07-23T12:00:00Z")),
-    { available: false, buckets: [], rolling: [] },
+    {
+      kind: "payg-ledger",
+      source: "litellm",
+      currency: "USD",
+      available: false,
+      buckets: [],
+      rolling: [],
+    },
   );
 });

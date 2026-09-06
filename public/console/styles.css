@@ -784,6 +784,16 @@ code, pre, .mono { font-family: var(--font-mono); }
   margin-bottom: 14px;
   font-size: 12.5px;
 }
+.usage-accounting {
+  color: var(--text-soft);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  padding: 10px 13px;
+  margin-bottom: 14px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
 .usage-card-head { align-items: flex-start; }
 .usage-card-head .card__hint { margin: 4px 0 0; }
 .usage-chart-card { overflow: hidden; }
@@ -855,6 +865,11 @@ code, pre, .mono { font-family: var(--font-mono); }
 .usage-meter__fill--critical { background: var(--coral); }
 .usage-rate-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .usage-rate-pills .pill { font-family: var(--font-mono); }
+.usage-native-list { display: grid; gap: 10px; }
+.usage-native-status { text-transform: none; letter-spacing: 0; }
+.usage-native-status--available { color: var(--ok); border-color: var(--ok); }
+.usage-native-status--exhausted { color: var(--coral); border-color: var(--coral); }
+.usage-native-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 7px; }
 
 /* ── organization learning review ─────────────────────────────────── */
 .learning-updated {

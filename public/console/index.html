@@ -365,7 +365,7 @@
       <div class="view__header">
         <div class="view__title-block">
           <h1 class="view__title" data-i18n="nav.usage">Usage</h1>
-          <p class="view__subtitle" data-i18n="usage.hint">A metered timeline of spend, tokens, requests, and remaining internal-key quota.</p>
+          <p class="view__subtitle" data-i18n="usage.hint">Authoritative provider usage and separate organization policy, without estimated billing.</p>
         </div>
         <div class="usage-updated mono" id="usage-updated">—</div>
       </div>
@@ -388,9 +388,10 @@
         <button type="button" class="btn-ghost usage-toolbar__refresh" id="usage-refresh" data-i18n="usage.refresh">Refresh</button>
       </section>
 
+      <div class="usage-accounting hidden" id="usage-accounting" role="status"></div>
       <div class="usage-unavailable hidden" id="usage-unavailable" role="status" data-i18n="usage.unavailable">The authoritative usage ledger is unavailable. Configured limits remain visible; zeroes are not fabricated.</div>
 
-      <div class="grid grid--kpi mb-2">
+      <div class="grid grid--kpi mb-2" id="usage-payg-kpis">
         <div class="kpi kpi--trace">
           <div class="kpi__label" data-i18n="usage.kpi.spend">Spend</div>
           <div class="kpi__value" id="usage-total-spend">—</div>
@@ -413,7 +414,7 @@
         </div>
       </div>
 
-      <section class="card usage-chart-card">
+      <section class="card usage-chart-card" id="usage-payg-chart-card">
         <div class="card__head usage-card-head">
           <div>
             <h2 class="card__title" data-i18n="usage.chart.title">Metered activity</h2>
@@ -427,18 +428,29 @@
         <div class="usage-chart" id="usage-chart" role="img" data-i18n-title="usage.chart.title" title="Metered activity"></div>
       </section>
 
+      <section class="card hidden" id="usage-native-card">
+        <div class="card__head usage-card-head">
+          <div>
+            <h2 class="card__title" data-i18n="usage.native.title">Provider allowance</h2>
+            <p class="card__hint" data-i18n="usage.native.hint">Values and reset windows are shown in the provider's own units.</p>
+          </div>
+          <span class="pill pill--accent" id="usage-native-source" data-i18n="usage.native.authoritative">Provider authoritative</span>
+        </div>
+        <div id="usage-native-allowance"></div>
+      </section>
+
       <section class="card">
         <div class="card__head usage-card-head">
           <div>
-            <h2 class="card__title" data-i18n="usage.quota.title">Quota runway</h2>
-            <p class="card__hint" data-i18n="usage.quota.hint">Current 5-hour, 7-day, and 30-day consumption against each active key's limits.</p>
+            <h2 class="card__title" data-i18n="usage.quota.title">Organization policy</h2>
+            <p class="card__hint" data-i18n="usage.quota.hint">Control-managed limits remain separate from the upstream provider allowance.</p>
           </div>
-          <span class="pill pill--accent" data-i18n="usage.quota.enforced">Gateway enforced</span>
+          <span class="pill pill--accent" data-i18n="usage.quota.enforced">Control enforced</span>
         </div>
         <div id="usage-quotas"></div>
       </section>
 
-      <section class="card">
+      <section class="card" id="usage-payg-breakdown-card">
         <div class="card__head usage-card-head">
           <div>
             <h2 class="card__title" data-i18n="usage.breakdown.title">Who used what</h2>

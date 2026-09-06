@@ -24,6 +24,11 @@ test("console usage dashboard exposes its route, controls, chart, quota, and bre
     "usage-orgid",
     "usage-refresh",
     "usage-unavailable",
+    "usage-accounting",
+    "usage-payg-kpis",
+    "usage-payg-chart-card",
+    "usage-native-card",
+    "usage-native-allowance",
     "usage-total-spend",
     "usage-total-tokens",
     "usage-total-requests",
@@ -43,8 +48,13 @@ test("console usage dashboard loads the authoritative endpoint and never labels 
   assert.doesNotThrow(() => new Function(app));
   assert.match(app, /\/admin\/usage\?orgId=/);
   assert.match(app, /report\.available === true/);
+  assert.match(app, /accounting\?\.mode === ["']provider-native["']/);
+  assert.match(app, /renderNativeAllowance/);
+  assert.match(app, /nativeMeterPercent/);
   assert.match(app, /usage-unavailable/);
   assert.match(app, /available \? formatMoney\(totals\.spend\) : ["']—["']/);
+  assert.doesNotMatch(app, /totalTokens[^\n]{0,120}(remaining|allowance|usedUsd)/i,
+    "transport token totals must not become a subscription allowance");
 });
 
 test("console usage copy is complete in every supported locale", () => {
@@ -57,10 +67,15 @@ test("console usage copy is complete in every supported locale", () => {
     "usage.range.7d",
     "usage.range.30d",
     "usage.unavailable",
+    "usage.accounting.provider",
+    "usage.accounting.gateway",
     "usage.kpi.spend",
     "usage.kpi.tokens",
     "usage.kpi.requests",
     "usage.chart.title",
+    "usage.native.title",
+    "usage.native.unavailable",
+    "usage.native.status.exhausted",
     "usage.quota.title",
     "usage.quota.value",
     "usage.breakdown.title",

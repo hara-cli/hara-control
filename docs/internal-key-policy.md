@@ -9,6 +9,11 @@ have an explicit Person record; device-name fallback is not an accountable ident
 
 ## Supported limits
 
+The table below describes Hara Control's current **LiteLLM PAYG organization policy**. It is not a
+universal formula for vendor subscriptions. A future Alibaba Cloud, MiniMax, Volcengine, or other
+provider adapter must preserve that provider's native units, coefficients, reset windows, and
+exhaustion state. Hara must never convert response tokens into an invented USD or subscription balance.
+
 | Control field | Meaning | Data-plane value |
 |---|---|---|
 | `tokenTtlMinutes` | Key lifetime; 5 minutes through 365 days | LiteLLM key `duration` |
@@ -24,6 +29,10 @@ not calendar-week or calendar-month accounting. Up to one limit per window can b
 time. Omitting a budget or rate field leaves that dimension unlimited; the default key lifetime remains
 seven days. Every limit applies to the device key as a whole, aggregated across all models used through
 that one managed connection.
+
+An upstream subscription allowance and an organization policy are separate controls. A provider's
+native allowance window can coexist with Control's RPM, TPM, or administrator-defined policy; when a
+request is denied, the system must retain which authority made that decision rather than merging the two.
 
 Non-expiring is not the same as unlimited. The key has no automatic date-based cutoff, but every rolling
 budget and rate limit continues to reset and enforce normally, its usage remains visible in the fleet and
@@ -76,9 +85,9 @@ device key created after redemption has no fixed expiry.
 1. Hara Control validates and stores the normalized policy with the one-time code.
 2. Enrollment atomically claims the code and requests one LiteLLM key authorized for every managed model,
    with the exact expiry, three rolling budget windows, RPM, and TPM values.
-3. Before a USD-limited key is minted, Hara requires every LiteLLM deployment behind every authorized alias to
-   report positive input and output prices. Missing, zero, or unreadable pricing fails closed because a
-   dollar ceiling cannot be enforced against zero-cost accounting.
+3. For the LiteLLM PAYG adapter only, before a USD-limited key is minted, Hara requires every deployment
+   behind every authorized alias to report positive input and output prices. Missing, zero, or unreadable
+   pricing fails closed because a dollar ceiling cannot be enforced against zero-cost accounting.
 4. LiteLLM must return the authoritative expiry and confirm every requested limit. A missing, changed, or
    malformed limit causes enrollment to fail closed; Hara Control revokes the possibly-created alias and
    restores the one-time code for a safe retry.
@@ -109,8 +118,9 @@ The fleet response includes `spend_available`. A real zero is returned as `spend
 `$0.00`. Production readiness also checks that the isolated alias/spend columns are readable, so schema
 or permission drift fails closed before a deployment is declared healthy.
 
-The console's **Usage** view reads `GET /admin/usage?orgId=<id>&range=24h|7d|30d`. It displays the
-authoritative USD spend, prompt-plus-completion tokens, request counts, last activity, device/model
+For the LiteLLM PAYG adapter, the console's **Usage** view reads
+`GET /admin/usage?orgId=<id>&range=24h|7d|30d`. It displays the authoritative USD spend,
+prompt-plus-completion tokens, request counts, last activity, device/model
 breakdowns, and active-key quota progress. The query selects only parameterized aliases and aggregates
 from LiteLLM's isolated ledger; it never returns raw virtual keys, prompts, responses, authorization
 headers, or requester IP addresses. An organization-scoped admin can only read its assigned organization.
@@ -128,3 +138,20 @@ deleted even if either check fails.
 Internal access policy is distinct from upstream provider-key management. Multiple encrypted upstream
 connections, key-pool routing, weights, and provider health are a separate control-plane feature; changing
 an internal colleague limit must not rotate or expose any provider credential.
+
+## Provider-native subscription accounting
+
+Control exposes the accounting source explicitly instead of flattening every provider into the current
+LiteLLM schema:
+
+- `payg-ledger` is the current LiteLLM USD ledger. Its rolling 5-hour, 7-day, and 30-day progress is valid
+  only for that adapter and currency.
+- `provider-native` carries the provider name, freshness boundary, authoritative flag, and opaque native
+  meters. A meter can use requests, credits, points, currency, seats, or another provider-defined unit.
+- A native report leaves the legacy PAYG totals and `usedUsd` unavailable. Its meters are mapped to the
+  organization person and device without returning the private gateway alias.
+
+Prompt and completion tokens remain useful transport diagnostics, but they are never treated as dollars,
+Fuel Points, subscription credits, or proof of exhaustion. Unattended provider switching is allowed only
+when a fresh authoritative provider or Control response says the allowance is exhausted. Rate limiting,
+timeouts, and 5xx responses are route-health signals and must follow a separate retry/failover policy.

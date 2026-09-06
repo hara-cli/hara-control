@@ -335,6 +335,9 @@ export class AdminService {
       }
     }
     const gatewayUsage = await this.gateway.usage([...keyMeta.keys()], range, now);
+    const paygUsage = gatewayUsage.kind === "payg-ledger" ? gatewayUsage : undefined;
+    const nativeUsage = gatewayUsage.kind === "provider-native" ? gatewayUsage : undefined;
+    const spendAvailable = paygUsage?.available === true;
     const series = Array.from({ length: window.bucketCount }, (_, index) => ({
       at: new Date(window.from.getTime() + index * window.bucketMs),
       spend: 0,
@@ -355,8 +358,8 @@ export class AdminService {
     let totalTokens = 0;
     let requests = 0;
     let latestRequestAt: Date | null = null;
-    if (gatewayUsage.available) {
-      for (const entry of gatewayUsage.buckets) {
+    if (spendAvailable) {
+      for (const entry of paygUsage.buckets) {
         const meta = keyMeta.get(entry.keyId);
         if (!meta) continue;
         const bucketIndex = Math.round((entry.bucketAt.getTime() - window.from.getTime()) / window.bucketMs);
@@ -387,7 +390,7 @@ export class AdminService {
       }
     }
 
-    const rolling = new Map(gatewayUsage.rolling.map((entry) => [entry.keyId, entry]));
+    const rolling = new Map((paygUsage?.rolling ?? []).map((entry) => [entry.keyId, entry]));
     const rollingField: Record<AccessBudgetWindow, "spend5h" | "spend7d" | "spend30d"> = {
       "5h": "spend5h",
       week: "spend7d",
@@ -404,7 +407,9 @@ export class AdminService {
         const maxUsd = Number(row.maxUsd);
         if (!ACCESS_BUDGET_WINDOWS.includes(budgetWindow) || !Number.isFinite(maxUsd) || maxUsd <= 0) return [];
         const usage = rolling.get(token.gatewayKeyId);
-        const usedUsd = gatewayUsage.available ? (usage?.[rollingField[budgetWindow]] ?? 0) : null;
+        // A USD policy is comparable only with the PAYG ledger that reports USD.
+        // Provider subscription meters remain native and must never be converted from response tokens.
+        const usedUsd = spendAvailable ? (usage?.[rollingField[budgetWindow]] ?? 0) : null;
         return [{
           window: budgetWindow,
           maxUsd,
@@ -432,12 +437,54 @@ export class AdminService {
       range,
       from: window.from,
       to: window.to,
-      available: gatewayUsage.available,
-      totals: gatewayUsage.available
+      /** Backward-compatible name: this describes the PAYG spend ledger, not every allowance source. */
+      available: spendAvailable,
+      accounting: gatewayUsage.kind === "payg-ledger"
+        ? {
+            authority: "gateway" as const,
+            mode: "payg-ledger" as const,
+            source: gatewayUsage.source,
+            unit: gatewayUsage.currency,
+            haraMayInferBillingFromTransportTokens: false as const,
+          }
+        : {
+            authority: "provider" as const,
+            mode: "provider-native" as const,
+            source: gatewayUsage.provider,
+            unit: "provider-defined" as const,
+            authoritative: gatewayUsage.authoritative,
+            fetchedAt: gatewayUsage.fetchedAt,
+            validUntil: gatewayUsage.validUntil ?? null,
+            haraMayInferBillingFromTransportTokens: false as const,
+          },
+      nativeAllowance: nativeUsage
+        ? {
+            available: nativeUsage.available,
+            meters: nativeUsage.available
+              ? nativeUsage.meters.flatMap((meter) => {
+                  const meta = keyMeta.get(meter.keyId);
+                  if (!meta) return [];
+                  return [{
+                    ...meta,
+                    id: meter.id,
+                    label: meter.label,
+                    unit: meter.unit,
+                    availability: meter.availability,
+                    ...(meter.used !== undefined ? { used: meter.used } : {}),
+                    ...(meter.remaining !== undefined ? { remaining: meter.remaining } : {}),
+                    ...(meter.limit !== undefined ? { limit: meter.limit } : {}),
+                    ...(meter.window !== undefined ? { window: meter.window } : {}),
+                    ...(meter.resetAt !== undefined ? { resetAt: meter.resetAt } : {}),
+                  }];
+                })
+              : [],
+          }
+        : null,
+      totals: spendAvailable
         ? { spend: totalSpend, totalTokens, requests, latestRequestAt }
         : { spend: null, totalTokens: null, requests: null, latestRequestAt: null },
-      series: gatewayUsage.available ? series : [],
-      breakdown: gatewayUsage.available
+      series: spendAvailable ? series : [],
+      breakdown: spendAvailable
         ? [...breakdown.values()].sort((a, b) => b.spend - a.spend || b.totalTokens - a.totalTokens)
         : [],
       quotas,

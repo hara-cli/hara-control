@@ -42,12 +42,51 @@ export interface GatewayRollingSpend {
   spend30d: number;
 }
 
-export interface GatewayUsageReport {
+/** Current LiteLLM/PAYG accounting. USD is authoritative only for this adapter kind. */
+export interface GatewayPaygUsageReport {
+  kind: "payg-ledger";
+  /** Adapter/report origin. Do not assume every PAYG ledger is LiteLLM. */
+  source: string;
+  currency: "USD";
   /** false means the authoritative ledger was unavailable; callers must not render fake zeroes. */
   available: boolean;
   buckets: GatewayUsageBucket[];
   rolling: GatewayRollingSpend[];
 }
+
+export type GatewayNativeMeterValue = number | string;
+
+/** One untouched provider/subscription meter for one managed connection. */
+export interface GatewayNativeAllowanceMeter {
+  keyId: string;
+  id: string;
+  label: string;
+  /** Provider-defined: requests, credits, points, currency, seats, or a future unit. */
+  unit: string;
+  availability: "available" | "exhausted" | "unknown";
+  used?: GatewayNativeMeterValue;
+  remaining?: GatewayNativeMeterValue;
+  limit?: GatewayNativeMeterValue;
+  window?: string;
+  resetAt?: Date;
+}
+
+/**
+ * A vendor subscription/prepaid adapter preserves native semantics. It does not
+ * synthesize USD spend or reuse Hara request tokens as a remaining balance.
+ */
+export interface GatewayNativeUsageReport {
+  kind: "provider-native";
+  provider: string;
+  available: boolean;
+  authoritative: boolean;
+  fetchedAt: Date;
+  /** Adapter-owned freshness boundary; required before unattended failover. */
+  validUntil?: Date;
+  meters: GatewayNativeAllowanceMeter[];
+}
+
+export type GatewayUsageReport = GatewayPaygUsageReport | GatewayNativeUsageReport;
 
 export interface GatewayAdapter {
   issueKey(opts: {
@@ -64,6 +103,10 @@ export interface GatewayAdapter {
   syncKeyModels(keyId: string, models: string[]): Promise<string[]>;
   revokeKey(keyId: string): Promise<void>;
   listSpend(keyIds: string[]): Promise<SpendRecord[]>;
+  /**
+   * The adapter chooses its accounting kind. Control must branch on the
+   * discriminant and never force a provider-native subscription through USD.
+   */
   usage(keyIds: string[], range: UsageRange, now?: Date): Promise<GatewayUsageReport>;
   /**
    * Cheap read-only readiness. It must verify the key-management data path without issuing a

@@ -16,7 +16,9 @@
 - **Device enrollment** — `hara enroll <gateway>` pairs a machine, issues it a scoped device token
   (the real upstream provider key **never** lands on the device).
 - **Token lifecycle** — issue / multi-model scope / expiry / rolling budget / rate limit / revoke per device, per user.
-- **Fleet view** — which machines are online, who, version, today's tokens + cost, which models.
+- **Fleet view** — which machines are online, who, version, models, and the authoritative accounting
+  source. The current LiteLLM adapter exposes a PAYG USD ledger; provider subscriptions retain native
+  units and are never estimated from response tokens.
 - **Governance** — model allow-lists, per-seat budgets, data-residency policy, org RBAC, audit log.
 - **Reviewed business learning** — collect redacted recurring execution receipts, let an administrator
   approve/reject/revoke them, and distribute only the versioned approved bundle to enrolled devices.

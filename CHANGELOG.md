@@ -2,6 +2,17 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.33 - 2026-09-06
+
+### Fixed
+
+- Distinguish Control-metered pay-as-you-go spend from provider-native subscription usage throughout the
+  administrator API and console. Native units, availability, windows, reset times and authoritative exhaustion
+  signals are preserved without converting transport tokens into invented currency or plan percentages.
+- Keep provider-native usage scoped to the selected organization and omit internal Key aliases from the response.
+  If an upstream provider exposes no authoritative usage API, the console now reports that limitation instead of
+  fabricating a quota estimate; existing model routing, revocation and usage-ledger behavior are unchanged.
+
 ## 0.1.32 - 2026-09-03
 
 ### Added

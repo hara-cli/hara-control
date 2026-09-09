@@ -24,6 +24,10 @@ const rdsDeploy = readFileSync(
   resolve("deploy/nanhara-tech/deploy-ai-rds.sh"),
   "utf8",
 );
+const testDeploy = readFileSync(
+  resolve("deploy/nanhara-tech/deploy-ai.sh"),
+  "utf8",
+);
 const selfHostEnvironmentExample = readFileSync(resolve(".env.example"), "utf8");
 const productionEnvironmentExample = readFileSync(
   resolve("deploy/nanhara-tech/.env.prod.example"),
@@ -113,6 +117,20 @@ test("RDS deploy proves a paid request records spend before restarting Control",
   assert.match(rdsDeploy, /scripts\/with-production-env\.mjs "\$APP_DIR\/\.env"/);
   assert.match(rdsDeploy, /for probe_model in deepseek-v4-flash deepseek-v4-pro deepseek-v4-flash-vision-exp/);
   assert.match(rdsDeploy, /HARA_PRICED_PROBE_MODEL="\$probe_model"/);
+});
+
+test("every server deploy pins PM2 and validates CLI/daemon output before mutation", () => {
+  for (const deploy of [rdsDeploy, testDeploy]) {
+    assert.match(deploy, /PM2_REQUIRED_VERSION="6\.0\.14"/);
+    assert.match(deploy, /install --global "pm2@\$PM2_REQUIRED_VERSION"/);
+    assert.doesNotMatch(deploy, /npm (?:i|install) -g pm2(?:\s|;|$)/);
+    assert.match(deploy, /PM2 CLI\/daemon compatibility check failed before deployment mutation/);
+  }
+
+  const preflightAt = rdsDeploy.indexOf("pm2_clean jlist");
+  const migrationAt = rdsDeploy.indexOf("npm run prisma:deploy");
+  const deleteAt = rdsDeploy.indexOf('pm2_clean delete "$LITELLM_PM2_NAME"');
+  assert.ok(preflightAt >= 0 && migrationAt > preflightAt && deleteAt > preflightAt);
 });
 
 test("every tracked environment example exposes the managed DeepSeek visual route", () => {

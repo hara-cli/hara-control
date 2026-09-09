@@ -23,11 +23,39 @@ if [ "${HARA_ENV_LOADED:-}" != "1" ]; then
   exec node scripts/with-production-env.mjs "$APP_DIR/.env" -- bash "$0" "$@"
 fi
 
-command -v pm2  >/dev/null || { echo "… installing pm2 globally"; npm i -g pm2; }
 NODE_BIN="$(command -v node)"
-PM2_BIN="$(command -v pm2)"
+NPM_BIN="$(command -v npm)"
 ENV_BIN="$(command -v env)"
 PM2_HOME_VALUE="${PM2_HOME:-$HOME/.pm2}"
+PM2_REQUIRED_VERSION="6.0.14"
+PM2_BIN="$(command -v pm2 2>/dev/null || true)"
+
+# A newer PM2 CLI can prepend a daemon-version warning to `pm2 jlist`, turning otherwise valid JSON
+# into an unparsable stream. Resolve the CLI version without exposing the loaded production secrets,
+# then install the exact version used by the server daemon when required.
+pm2_cli_version_clean() {
+  [ -n "$PM2_BIN" ] || return 1
+  env -i \
+    HOME="$HOME" \
+    USER="${USER:-}" \
+    LOGNAME="${LOGNAME:-${USER:-}}" \
+    PATH="$PATH" \
+    PM2_HOME="$PM2_HOME_VALUE" \
+    "$PM2_BIN" --version 2>/dev/null | tail -n 1 | tr -d '\r'
+}
+
+PM2_CLI_VERSION="$(pm2_cli_version_clean || true)"
+if [ "$PM2_CLI_VERSION" != "$PM2_REQUIRED_VERSION" ]; then
+  echo "… installing pinned pm2 ${PM2_REQUIRED_VERSION}"
+  env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-${USER:-}}" PATH="$PATH" \
+    "$NPM_BIN" install --global "pm2@$PM2_REQUIRED_VERSION"
+  PM2_BIN="$(command -v pm2)"
+  PM2_CLI_VERSION="$(pm2_cli_version_clean || true)"
+fi
+[ "$PM2_CLI_VERSION" = "$PM2_REQUIRED_VERSION" ] || {
+  echo "✗ PM2 CLI must be exactly ${PM2_REQUIRED_VERSION}; got ${PM2_CLI_VERSION:-unavailable}"
+  exit 1
+}
 
 # PM2 serializes the environment presented by its client. Invoke every mutating PM2 command from a
 # deliberately empty environment so database credentials, control-plane auth and KMS material are
@@ -42,6 +70,16 @@ pm2_clean() {
     PM2_HOME="$PM2_HOME_VALUE" \
     "$PM2_BIN" "$@"
 }
+
+# Validate the CLI/daemon protocol before builds, migrations, or process replacement. A version
+# warning on stdout intentionally fails this gate instead of removing healthy process definitions.
+if ! pm2_clean jlist | "$NODE_BIN" -e '
+  const processes = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+  if (!Array.isArray(processes)) process.exit(1);
+'; then
+  echo "✗ PM2 CLI/daemon compatibility check failed before deployment mutation"
+  exit 1
+fi
 
 PORT="${PORT:-4100}"
 echo "▶ DB target: $(printf '%s' "$DATABASE_URL" | sed -E 's#://[^@]+@#://***:***@#')" # mask creds in the log

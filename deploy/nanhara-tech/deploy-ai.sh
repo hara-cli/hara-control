@@ -19,7 +19,38 @@ if [ "${HARA_ENV_LOADED:-}" != "1" ]; then
   exec node scripts/with-production-env.mjs "$APP_DIR/.env" -- bash "$0" "$@"
 fi
 
-command -v pm2  >/dev/null || { echo "… installing pm2 globally"; npm i -g pm2; }
+PM2_REQUIRED_VERSION="6.0.14"
+PM2_BIN="$(command -v pm2 2>/dev/null || true)"
+PM2_CLI_VERSION=""
+if [ -n "$PM2_BIN" ]; then
+  PM2_CLI_VERSION="$(
+    env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-${USER:-}}" PATH="$PATH" \
+      "$PM2_BIN" --version 2>/dev/null | tail -n 1 | tr -d '\r'
+  )"
+fi
+if [ "$PM2_CLI_VERSION" != "$PM2_REQUIRED_VERSION" ]; then
+  echo "… installing pinned pm2 ${PM2_REQUIRED_VERSION}"
+  env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-${USER:-}}" PATH="$PATH" \
+    npm install --global "pm2@$PM2_REQUIRED_VERSION"
+  PM2_BIN="$(command -v pm2)"
+  PM2_CLI_VERSION="$(
+    env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-${USER:-}}" PATH="$PATH" \
+      "$PM2_BIN" --version 2>/dev/null | tail -n 1 | tr -d '\r'
+  )"
+fi
+[ "$PM2_CLI_VERSION" = "$PM2_REQUIRED_VERSION" ] || {
+  echo "✗ PM2 CLI must be exactly ${PM2_REQUIRED_VERSION}; got ${PM2_CLI_VERSION:-unavailable}"
+  exit 1
+}
+
+if ! env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-${USER:-}}" PATH="$PATH" \
+  "$PM2_BIN" jlist | node -e '
+    const processes = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+    if (!Array.isArray(processes)) process.exit(1);
+  '; then
+  echo "✗ PM2 CLI/daemon compatibility check failed before deployment mutation"
+  exit 1
+fi
 
 PORT="${PORT:-4100}"
 

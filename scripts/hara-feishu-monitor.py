@@ -89,6 +89,11 @@ CONTROL_KEY_FILE = Path(os.environ.get(
     "HARA_FEEDBACK_INTAKE_KEY_FILE",
     str(AUTOMATION_DIR / "credentials" / "control-feedback.key"),
 )).expanduser()
+DESK_BASE_URL = os.environ.get("HARA_FEEDBACK_DESK_URL", "").strip().rstrip("/")
+DESK_KEY_FILE = Path(os.environ.get(
+    "HARA_FEEDBACK_DESK_KEY_FILE",
+    str(AUTOMATION_DIR / "credentials" / "desk-feedback.key"),
+)).expanduser()
 MESSAGE_ID_RE = re.compile(r"^om_[A-Za-z0-9]+$")
 POLL_SECONDS = max(15, min(300, int(os.environ.get("HARA_FEISHU_POLL_SECONDS", "60"))))
 MAX_RESTART_CATCHUP_SECONDS = max(
@@ -149,14 +154,14 @@ def load_or_create_consumer_id() -> str:
     return consumer_id
 
 
-def read_control_key() -> str:
-    metadata = CONTROL_KEY_FILE.lstat()
+def read_owner_only_key(key_file: Path, purpose: str) -> str:
+    metadata = key_file.lstat()
     if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
-        raise RuntimeError("feedback intake key must be a regular file")
+        raise RuntimeError(f"{purpose} key must be a regular file")
     if metadata.st_uid != os.getuid() or metadata.st_mode & 0o077:
-        raise RuntimeError("feedback intake key file must be owner-only (chmod 600)")
+        raise RuntimeError(f"{purpose} key file must be owner-only (chmod 600)")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(CONTROL_KEY_FILE, flags)
+    descriptor = os.open(key_file, flags)
     try:
         opened = os.fstat(descriptor)
         if (
@@ -164,7 +169,7 @@ def read_control_key() -> str:
             or opened.st_dev != metadata.st_dev
             or opened.st_ino != metadata.st_ino
         ):
-            raise RuntimeError("feedback intake key changed while opening")
+            raise RuntimeError(f"{purpose} key changed while opening")
         with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
             descriptor = -1
             key = handle.read(4096).strip()
@@ -172,11 +177,19 @@ def read_control_key() -> str:
         if descriptor >= 0:
             os.close(descriptor)
     if len(key) < 32:
-        raise RuntimeError("feedback intake key is too short")
+        raise RuntimeError(f"{purpose} key is too short")
     return key
 
 
-def validate_control_url(value: str) -> None:
+def read_control_key() -> str:
+    return read_owner_only_key(CONTROL_KEY_FILE, "Control feedback intake")
+
+
+def read_desk_key() -> str:
+    return read_owner_only_key(DESK_KEY_FILE, "Desk feedback intake")
+
+
+def validate_service_url(value: str, setting_name: str) -> None:
     if not value:
         return
     parsed = urllib_parse.urlparse(value)
@@ -184,7 +197,15 @@ def validate_control_url(value: str) -> None:
         return
     if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
         return
-    raise RuntimeError("HARA_FEEDBACK_CONTROL_URL must use HTTPS or loopback HTTP")
+    raise RuntimeError(f"{setting_name} must use HTTPS or loopback HTTP")
+
+
+def validate_control_url(value: str) -> None:
+    validate_service_url(value, "HARA_FEEDBACK_CONTROL_URL")
+
+
+def validate_desk_url(value: str) -> None:
+    validate_service_url(value, "HARA_FEEDBACK_DESK_URL")
 
 
 def control_request(method: str, target: str, payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -210,6 +231,32 @@ def control_request(method: str, target: str, payload: dict[str, Any]) -> dict[s
             return decoded if isinstance(decoded, dict) else None
     except (OSError, UnicodeError, json.JSONDecodeError, urllib_error.URLError, RuntimeError) as error:
         LOGGER.warning("Control ticket request failed error_type=%s", type(error).__name__)
+        return None
+
+
+def desk_request(method: str, target: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not DESK_BASE_URL:
+        return None
+    try:
+        key = read_desk_key()
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = urllib_request.Request(
+            f"{DESK_BASE_URL}{target}",
+            data=body,
+            method=method,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "hara-feishu-monitor/1",
+                "X-Desk-Intake-Key": key,
+            },
+        )
+        with urllib_request.urlopen(request, timeout=30) as response:
+            if response.status < 200 or response.status >= 300:
+                raise RuntimeError(f"unexpected Desk status {response.status}")
+            decoded = json.loads(response.read(1024 * 1024).decode("utf-8"))
+            return decoded if isinstance(decoded, dict) else None
+    except (OSError, UnicodeError, json.JSONDecodeError, urllib_error.URLError, RuntimeError) as error:
+        LOGGER.warning("Desk ticket request failed error_type=%s", type(error).__name__)
         return None
 
 
@@ -382,6 +429,7 @@ def sync_control_intake(record: dict[str, Any]) -> bool:
     record["controlTicketId"] = ticket_uuid
     record["controlTicketStatus"] = str(ticket.get("status") or "RECEIVED")
     record["controlClaimGranted"] = claim_granted
+    record["controlClaimExpiresAt"] = str(ticket.get("claimExpiresAt") or "")
     record["controlSyncedAt"] = int(time.time())
     if claim_granted and claim_token:
         record["controlClaimToken"] = claim_token
@@ -422,6 +470,162 @@ def sync_control_transition(
     record["controlTicketStatus"] = str(response.get("status") or ticket_status)
     record["controlSyncedAt"] = int(time.time())
     return True
+
+
+def sync_desk_intake(record: dict[str, Any]) -> bool:
+    if not DESK_BASE_URL:
+        return False
+    payload = {
+        "sourceKind": "feishu",
+        "sourceChatId": CHAT_ID,
+        "sourceMessageId": str(record.get("messageId") or ""),
+        "title": str(record.get("ticketTitle") or "Hara feedback"),
+        "body": str(record.get("ticketSummary") or ""),
+        "reporterRef": str(record.get("senderId") or ""),
+        "priority": "high" if record.get("sourceKind") == "crash-intake" else "normal",
+        "severity": "major" if record.get("sourceKind") == "crash-intake" else "minor",
+    }
+    response = desk_request("POST", "/intake/feedback", payload)
+    task = response.get("task") if isinstance(response, dict) else None
+    if not isinstance(task, dict) or not re.fullmatch(r"t_[a-f0-9]+", str(task.get("id") or "")):
+        return False
+    record["deskTaskId"] = str(task["id"])
+    record["deskTaskState"] = str(task.get("state") or "open")
+    record["deskDuplicate"] = str(response.get("duplicate") or "")
+    record["deskSyncedAt"] = int(time.time())
+    LOGGER.info(
+        "Desk ticket synced desk_task_id=%s ticket_id=%s message_id=%s duplicate=%s",
+        record["deskTaskId"],
+        record.get("ticketId"),
+        record.get("messageId"),
+        record["deskDuplicate"] or "none",
+    )
+    return True
+
+
+def sync_desk_transition(
+    record: dict[str, Any],
+    ticket_status: str,
+    note: str = "",
+    release_version: str = "",
+    verification_steps: str = "",
+) -> bool:
+    task_id = str(record.get("deskTaskId") or "")
+    # A new Feishu message that merged into another active Desk task is an occurrence of that task,
+    # not a second lifecycle owner. Its intake event already records the source; do not let the
+    # duplicate monitor record advance or cancel the shared task.
+    if not DESK_BASE_URL or not task_id or record.get("deskDuplicate") == "fingerprint":
+        return False
+    payload: dict[str, Any] = {
+        "status": ticket_status,
+        "assignee": "Codex",
+    }
+    if note:
+        payload["note"] = sanitize_feedback_text(note, 1200)
+    if release_version:
+        payload["releaseVersion"] = sanitize_feedback_text(release_version, 64)
+    if verification_steps:
+        payload["verificationSteps"] = sanitize_feedback_text(verification_steps, 4000)
+    response = desk_request(
+        "POST",
+        f"/intake/feedback/{urllib_parse.quote(task_id, safe='')}/transition",
+        payload,
+    )
+    task = response.get("task") if isinstance(response, dict) else None
+    if not isinstance(task, dict):
+        return False
+    record["deskTaskState"] = str(task.get("state") or record.get("deskTaskState") or "")
+    record["deskSyncedAt"] = int(time.time())
+    return True
+
+
+def sync_ticket_transition(record: dict[str, Any], ticket_status: str, note: str = "") -> bool:
+    control_ok = not CONTROL_BASE_URL or sync_control_transition(record, ticket_status, note)
+    desk_required = bool(
+        DESK_BASE_URL
+        and record.get("deskTaskId")
+        and record.get("deskDuplicate") != "fingerprint"
+    )
+    desk_ok = not DESK_BASE_URL or (
+        not desk_required or sync_desk_transition(record, ticket_status, note)
+    )
+    return control_ok and desk_ok
+
+
+def queue_ticket_transition(
+    path: Path,
+    record: dict[str, Any],
+    ticket_status: str,
+    note: str,
+    phase: str,
+    *,
+    attempt: int | None = None,
+    final_status: str = "",
+    final_directory: str = "",
+) -> None:
+    pending: dict[str, Any] = {
+        "ticketStatus": ticket_status,
+        "note": sanitize_feedback_text(note, 1200),
+        "phase": phase,
+    }
+    if attempt is not None:
+        pending["attempt"] = attempt
+    if final_status:
+        pending["finalStatus"] = final_status
+    if final_directory:
+        pending["finalDirectory"] = final_directory
+    record["pendingTransition"] = pending
+    record["status"] = "waiting-for-ticket-transition"
+    record["nextAttemptAt"] = int(time.time()) + 60
+    atomic_json(path, record)
+
+
+def apply_pending_transition(path: Path, record: dict[str, Any]) -> str:
+    """Retry one durable backend transition; return waiting, continue, or finished."""
+    pending = record.get("pendingTransition")
+    if not isinstance(pending, dict):
+        return "continue"
+    ticket_status = str(pending.get("ticketStatus") or "")
+    note = str(pending.get("note") or "")
+    phase = str(pending.get("phase") or "")
+    if not ticket_status or phase not in {"before-worker", "terminal"}:
+        record["failedReason"] = "invalid-pending-transition"
+        finish_record(path, FAILED_DIR, record)
+        return "finished"
+    if not sync_ticket_transition(record, ticket_status, note):
+        record["status"] = "waiting-for-ticket-transition"
+        record["nextAttemptAt"] = int(time.time()) + 60
+        atomic_json(path, record)
+        LOGGER.warning(
+            "ticket transition unavailable; processing paused ticket_id=%s message_id=%s target=%s",
+            record.get("ticketId"),
+            record.get("messageId"),
+            ticket_status,
+        )
+        return "waiting"
+    record.pop("pendingTransition", None)
+    record["ticketStatus"] = ticket_status
+    record["nextAttemptAt"] = 0
+    if phase == "before-worker":
+        record["workerAttemptReady"] = int(pending.get("attempt") or 0)
+        record["status"] = "ready-to-start-worker"
+        atomic_json(path, record)
+        return "continue"
+    destination_name = str(pending.get("finalDirectory") or "")
+    destination_by_name = {
+        "done": DONE_DIR,
+        "failed": FAILED_DIR,
+        "skipped": SKIPPED_DIR,
+    }
+    destination = destination_by_name.get(destination_name)
+    if destination is None:
+        record["failedReason"] = "invalid-pending-transition-destination"
+        finish_record(path, FAILED_DIR, record)
+        return "finished"
+    record["status"] = str(pending.get("finalStatus") or "completed")
+    record["finishedAt"] = int(time.time())
+    finish_record(path, destination, record)
+    return "finished"
 
 
 def record_path(directory: Path, message_id: str) -> Path:
@@ -466,6 +670,10 @@ def enqueue(value: dict[str, Any]) -> bool:
     if CONTROL_BASE_URL:
         record["controlIntakeAttempted"] = True
         record["controlIntakeAvailable"] = sync_control_intake(record)
+        atomic_json(queued, record)
+    if DESK_BASE_URL:
+        record["deskIntakeAttempted"] = True
+        record["deskIntakeAvailable"] = sync_desk_intake(record)
         atomic_json(queued, record)
     LOGGER.info("queued ticket_id=%s message_id=%s", record.get("ticketId"), message_id)
     return True
@@ -596,7 +804,7 @@ def ensure_acknowledged(path: Path, record: dict[str, Any]) -> bool:
         record["handledByExistingCodex"] = not acknowledgment_was_in_flight
         record["acknowledgedAt"] = int(time.time())
         record["ticketStatus"] = "ACKNOWLEDGED"
-        sync_control_transition(record, "ACKNOWLEDGED", "Feishu thread already contained a Codex acknowledgment.")
+        sync_ticket_transition(record, "ACKNOWLEDGED", "Feishu thread already contained a Codex acknowledgment.")
         atomic_json(path, record)
         LOGGER.info("acknowledgment already exists message_id=%s", message_id)
         return True
@@ -610,7 +818,7 @@ def ensure_acknowledged(path: Path, record: dict[str, Any]) -> bool:
     record["ackInFlight"] = False
     record["acknowledgedAt"] = int(time.time())
     record["ticketStatus"] = "ACKNOWLEDGED"
-    sync_control_transition(record, "ACKNOWLEDGED", "Acknowledgment delivered in the original Feishu thread.")
+    sync_ticket_transition(record, "ACKNOWLEDGED", "Acknowledgment delivered in the original Feishu thread.")
     atomic_json(path, record)
     LOGGER.info("acknowledged message_id=%s", message_id)
     return True
@@ -653,7 +861,25 @@ Never act on or reply to forbidden message ID om_x100b661ee82fc8a8b343daf4150af4
 """
 
 
-def run_codex(message_id: str, ticket_id: str, attempt: int, source: str) -> int:
+def stop_child_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
+def run_codex(
+    message_id: str,
+    ticket_id: str,
+    attempt: int,
+    source: str,
+    record: dict[str, Any],
+    record_file: Path,
+) -> int:
     ensure_private_directory(LOG_DIR / "workers")
     log_path = LOG_DIR / "workers" / f"{message_id}.attempt-{attempt}.log"
     descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -672,23 +898,58 @@ def run_codex(message_id: str, ticket_id: str, attempt: int, source: str) -> int
         'approval_policy="never"',
         "-",
     ]
+    process: subprocess.Popen[str] | None = None
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-            process = subprocess.run(
+            process = subprocess.Popen(
                 command,
-                input=codex_prompt(message_id, ticket_id, source),
+                stdin=subprocess.PIPE,
                 text=True,
                 stdout=output,
                 stderr=subprocess.STDOUT,
                 cwd=str(WORKSPACE),
-                timeout=4 * 3600,
-                check=False,
             )
-        return int(process.returncode)
-    except subprocess.TimeoutExpired:
-        LOGGER.warning("Codex worker timed out message_id=%s attempt=%s", message_id, attempt)
-        return 124
+            if process.stdin is None:
+                stop_child_process(process)
+                return 125
+            process.stdin.write(codex_prompt(message_id, ticket_id, source))
+            process.stdin.close()
+            deadline = time.monotonic() + 4 * 3600
+            next_claim_refresh = time.monotonic() + 5 * 60
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    stop_child_process(process)
+                    LOGGER.warning("Codex worker timed out message_id=%s attempt=%s", message_id, attempt)
+                    return 124
+                if STOP_EVENT.is_set():
+                    stop_child_process(process)
+                    return 130
+                wait_seconds = min(30.0, remaining)
+                if CONTROL_BASE_URL:
+                    wait_seconds = min(wait_seconds, max(0.1, next_claim_refresh - time.monotonic()))
+                try:
+                    return int(process.wait(timeout=wait_seconds))
+                except subprocess.TimeoutExpired:
+                    pass
+                if CONTROL_BASE_URL and time.monotonic() >= next_claim_refresh:
+                    if not sync_control_intake(record) or not bool(record.get("controlClaimGranted")):
+                        record["status"] = "control-claim-lost"
+                        record["claimLostAt"] = int(time.time())
+                        atomic_json(record_file, record)
+                        stop_child_process(process)
+                        LOGGER.warning(
+                            "Codex worker stopped because Control claim could not be renewed ticket_id=%s message_id=%s",
+                            ticket_id,
+                            message_id,
+                        )
+                        return 126
+                    record["controlClaimHeartbeatAt"] = int(time.time())
+                    atomic_json(record_file, record)
+                    next_claim_refresh = time.monotonic() + 5 * 60
     except OSError:
+        if process is not None:
+            stop_child_process(process)
         LOGGER.exception("Codex worker launch failed message_id=%s attempt=%s", message_id, attempt)
         return 125
 
@@ -715,7 +976,7 @@ def quarantine_stale_queue_records(process_started_at_ms: int) -> int:
             "restartCutoffMs": process_started_at_ms - MAX_RESTART_CATCHUP_SECONDS * 1000,
         })
         if record.get("controlTicketId") and record.get("controlClaimToken"):
-            sync_control_transition(
+            sync_ticket_transition(
                 record,
                 "REJECTED",
                 "Local monitor restart skipped an expired catch-up item before sending another reply.",
@@ -741,7 +1002,13 @@ def process_record(path: Path) -> None:
     now = int(time.time())
     if int(record.get("nextAttemptAt") or 0) > now:
         return
-    if CONTROL_BASE_URL and not record.get("controlTicketId"):
+    pending_result = apply_pending_transition(path, record)
+    if pending_result != "continue":
+        return
+    record = load_json(path)
+    now = int(time.time())
+    control_sync_age = now - int(record.get("controlSyncedAt") or 0)
+    if CONTROL_BASE_URL and (not record.get("controlTicketId") or control_sync_age >= 5 * 60):
         record["controlIntakeAttempted"] = True
         record["controlIntakeAvailable"] = sync_control_intake(record)
         if not record["controlIntakeAvailable"]:
@@ -750,6 +1017,33 @@ def process_record(path: Path) -> None:
             atomic_json(path, record)
             LOGGER.warning(
                 "Control intake unavailable; reply and worker paused ticket_id=%s message_id=%s",
+                record.get("ticketId"),
+                message_id,
+            )
+            return
+        atomic_json(path, record)
+    remote_status = str(record.get("controlTicketStatus") or "")
+    if remote_status in {"WAITING_RELEASE", "WAITING_VERIFICATION", "CLOSED", "REJECTED", "BLOCKED"}:
+        record["status"] = "settled-by-control"
+        record["ticketStatus"] = remote_status
+        record["finishedAt"] = now
+        finish_record(path, DONE_DIR, record)
+        LOGGER.info(
+            "skipped settled Control ticket ticket_id=%s message_id=%s status=%s",
+            record.get("ticketId"),
+            message_id,
+            remote_status,
+        )
+        return
+    if DESK_BASE_URL and not record.get("deskTaskId"):
+        record["deskIntakeAttempted"] = True
+        record["deskIntakeAvailable"] = sync_desk_intake(record)
+        if not record["deskIntakeAvailable"]:
+            record["status"] = "waiting-for-desk"
+            record["nextAttemptAt"] = now + 60
+            atomic_json(path, record)
+            LOGGER.warning(
+                "Desk intake unavailable; reply and worker paused ticket_id=%s message_id=%s",
                 record.get("ticketId"),
                 message_id,
             )
@@ -768,6 +1062,24 @@ def process_record(path: Path) -> None:
         return
     if not ensure_acknowledged(path, record):
         return
+    if record.get("deskDuplicate") == "fingerprint":
+        queue_ticket_transition(
+            path,
+            record,
+            "REJECTED",
+            f"Duplicate occurrence linked to active Desk task {record.get('deskTaskId')}; no second Agent was started.",
+            "terminal",
+            final_status="linked-to-existing-desk-task",
+            final_directory="done",
+        )
+        if apply_pending_transition(path, record) == "finished":
+            LOGGER.info(
+                "skipped duplicate occurrence desk_task_id=%s ticket_id=%s message_id=%s",
+                record.get("deskTaskId"),
+                record.get("ticketId"),
+                message_id,
+            )
+        return
     if bool(record.get("handledByExistingCodex")):
         record["status"] = "handled-by-existing-codex"
         record["finishedAt"] = int(time.time())
@@ -778,42 +1090,66 @@ def process_record(path: Path) -> None:
             message_id,
         )
         return
-    attempt = int(record.get("attempts") or 0) + 1
+    ready_attempt = int(record.pop("workerAttemptReady", 0) or 0)
+    if ready_attempt:
+        attempt = ready_attempt
+    else:
+        attempt = int(record.get("attempts") or 0) + 1
+        queue_ticket_transition(
+            path,
+            record,
+            "IN_PROGRESS",
+            f"Automated Codex attempt {attempt} started.",
+            "before-worker",
+            attempt=attempt,
+        )
+        if apply_pending_transition(path, record) != "continue":
+            return
+        record = load_json(path)
+        ready_attempt = int(record.pop("workerAttemptReady", 0) or 0)
+        if ready_attempt != attempt:
+            record["failedReason"] = "invalid-worker-attempt-resume"
+            finish_record(path, FAILED_DIR, record)
+            return
     record["attempts"] = attempt
-    record["startedAt"] = now
+    record["startedAt"] = int(time.time())
     record["ticketStatus"] = "IN_PROGRESS"
-    sync_control_transition(record, "IN_PROGRESS", f"Automated Codex attempt {attempt} started.")
+    record["status"] = "worker-running"
     atomic_json(path, record)
     LOGGER.info("starting Codex message_id=%s attempt=%s", message_id, attempt)
     source = str(record.get("sourceKind") or "human-feedback")
     ticket_id = str(record.get("ticketId") or "HARA-FB-000000")
-    exit_code = run_codex(message_id, ticket_id, attempt, source)
+    exit_code = run_codex(message_id, ticket_id, attempt, source, record, path)
     record = load_json(path)
     record["lastExitCode"] = exit_code
     record["finishedAt"] = int(time.time())
     if exit_code == 0:
-        record["status"] = "completed"
-        record["ticketStatus"] = "WAITING_RELEASE"
-        sync_control_transition(
+        queue_ticket_transition(
+            path,
             record,
             "WAITING_RELEASE",
             "Automated worker finished successfully; release evidence and tester verification still require review.",
+            "terminal",
+            final_status="completed",
+            final_directory="done",
         )
-        finish_record(path, DONE_DIR, record)
-        LOGGER.info("completed message_id=%s", message_id)
+        if apply_pending_transition(path, record) == "finished":
+            LOGGER.info("completed message_id=%s", message_id)
         return
     if attempt >= MAX_ATTEMPTS:
-        record["status"] = "failed"
-        record["ticketStatus"] = "NEEDS_HUMAN"
         record["failedReason"] = "codex-worker-exhausted"
-        sync_control_transition(
+        queue_ticket_transition(
+            path,
             record,
             "BLOCKED",
             "Automated worker exhausted three attempts and requires human takeover.",
+            "terminal",
+            final_status="failed",
+            final_directory="failed",
         )
         reply_fixed(message_id, failure_text(record))
-        finish_record(path, FAILED_DIR, record)
-        LOGGER.error("exhausted message_id=%s", message_id)
+        if apply_pending_transition(path, record) == "finished":
+            LOGGER.error("exhausted message_id=%s", message_id)
         return
     record["status"] = "retrying"
     record["nextAttemptAt"] = int(time.time()) + min(1800, 60 * (2 ** (attempt - 1)))
@@ -895,6 +1231,9 @@ def validate_installation() -> None:
     if CONTROL_BASE_URL:
         read_control_key()
         load_or_create_consumer_id()
+    validate_desk_url(DESK_BASE_URL)
+    if DESK_BASE_URL:
+        read_desk_key()
     for directory in (AUTOMATION_DIR, DATA_DIR, QUEUE_DIR, DONE_DIR, FAILED_DIR, SKIPPED_DIR, LOG_DIR):
         ensure_private_directory(directory)
 
@@ -986,11 +1325,20 @@ def self_test() -> int:
     assert "alice" not in sanitize_feedback_text("token=topsecret /Users/alice/private", 200)
     validate_control_url("https://gw.nanhara.tech")
     validate_control_url("http://127.0.0.1:4100")
+    validate_desk_url("https://desk.nanhara.tech")
+    validate_desk_url("http://127.0.0.1:4200")
     try:
         validate_control_url("http://control.example.test")
         raise AssertionError("non-loopback HTTP should be rejected")
     except RuntimeError:
         pass
+    try:
+        validate_desk_url("http://desk.example.test")
+        raise AssertionError("non-loopback Desk HTTP should be rejected")
+    except RuntimeError:
+        pass
+    desk_record = {"deskTaskId": "t_1234abcd", "deskDuplicate": "fingerprint"}
+    assert not sync_desk_transition(desk_record, "IN_PROGRESS")
     assert WORKSPACE.name == "hara-desktop" and all(path.name in {"hara-cli", "hara-control"} for path in ADDITIONAL_WORKSPACES)
     assert "dangerously-bypass" not in " ".join([
         str(CODEX), "exec", "-s", "workspace-write", '-c', 'approval_policy="never"'

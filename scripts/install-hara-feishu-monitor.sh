@@ -3,6 +3,8 @@ set -euo pipefail
 
 CONTROL_URL=""
 KEY_FILE=""
+DESK_URL=""
+DESK_KEY_FILE=""
 MAX_RESTART_CATCHUP_SECONDS="900"
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -12,6 +14,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --key-file)
       KEY_FILE="${2:-}"
+      shift 2
+      ;;
+    --desk-url)
+      DESK_URL="${2:-}"
+      shift 2
+      ;;
+    --desk-key-file)
+      DESK_KEY_FILE="${2:-}"
       shift 2
       ;;
     --max-restart-catchup-seconds)
@@ -43,6 +53,21 @@ key_mode="$(stat -f '%Lp' "$KEY_FILE")"
 key_owner="$(stat -f '%u' "$KEY_FILE")"
 [ "$key_owner" = "$(id -u)" ] || { echo "key file must be owned by the current user" >&2; exit 2; }
 
+if [ -n "$DESK_URL" ] || [ -n "$DESK_KEY_FILE" ]; then
+  [ -n "$DESK_URL" ] && [ -n "$DESK_KEY_FILE" ] \
+    || { echo "--desk-url and --desk-key-file must be provided together" >&2; exit 2; }
+  case "$DESK_URL" in
+    https://*|http://127.0.0.1:*|http://localhost:*) ;;
+    *) echo "--desk-url must use HTTPS or loopback HTTP" >&2; exit 2 ;;
+  esac
+  [ -f "$DESK_KEY_FILE" ] || { echo "Desk key file does not exist: $DESK_KEY_FILE" >&2; exit 2; }
+  [ ! -L "$DESK_KEY_FILE" ] || { echo "Desk key file must not be a symbolic link" >&2; exit 2; }
+  desk_key_mode="$(stat -f '%Lp' "$DESK_KEY_FILE")"
+  [ "$desk_key_mode" = "600" ] || { echo "Desk key file must use mode 600" >&2; exit 2; }
+  desk_key_owner="$(stat -f '%u' "$DESK_KEY_FILE")"
+  [ "$desk_key_owner" = "$(id -u)" ] || { echo "Desk key file must be owned by the current user" >&2; exit 2; }
+fi
+
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 SOURCE="$SCRIPT_DIR/hara-feishu-monitor.py"
 AUTOMATION_DIR="$HOME/.codex/automations/hara-feishu-monitor"
@@ -67,6 +92,8 @@ set_plist_value() {
 set_plist_value HARA_FEEDBACK_CONTROL_URL "$CONTROL_URL"
 set_plist_value HARA_FEEDBACK_INTAKE_KEY_FILE "$KEY_FILE"
 set_plist_value HARA_FEISHU_MAX_RESTART_CATCHUP_SECONDS "$MAX_RESTART_CATCHUP_SECONDS"
+set_plist_value HARA_FEEDBACK_DESK_URL "$DESK_URL"
+set_plist_value HARA_FEEDBACK_DESK_KEY_FILE "$DESK_KEY_FILE"
 chmod 600 "$PLIST"
 
 launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true

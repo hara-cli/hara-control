@@ -227,6 +227,20 @@ test("claimed transition rejects an invalid lease token", async () => {
   );
 });
 
+test("claimed transition rejects a cryptographically valid but expired lease", async () => {
+  const fake = fakePrisma();
+  const service = new FeedbackTicketsService(fake.prisma);
+  const receipt = await service.intake(intake());
+  fake.rows[String(receipt.ticket.id)].claimExpiresAt = new Date(Date.now() - 1);
+  await assert.rejects(
+    () => service.updateClaimed(receipt.ticket.id, {
+      status: FeedbackTicketStatus.ACKNOWLEDGED,
+      claimToken: receipt.claimToken!,
+    }),
+    UnauthorizedException,
+  );
+});
+
 test("feedback intake guard is purpose-scoped and timing-safe", () => {
   const previous = process.env.HARA_FEEDBACK_INTAKE_KEY;
   process.env.HARA_FEEDBACK_INTAKE_KEY = "a".repeat(40);

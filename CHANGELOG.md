@@ -2,6 +2,23 @@
 
 All notable changes to hara-control are documented in this file.
 
+## 0.1.36 - 2026-09-11
+
+### Added
+
+- Mirror each accepted Feishu feedback source and lifecycle transition into Hara Desk while keeping Hara
+  Control authoritative for ticket numbering and the single processing lease. The two backends use separate,
+  purpose-scoped owner-only credential files; neither secret enters process arguments, logs, or Feishu.
+- Persist backend transitions before starting or archiving a worker. Transient Control or Desk failures now
+  pause and retry the same durable queue item instead of launching work early or losing its final status.
+
+### Fixed
+
+- Reject expired feedback-processing claims, renew the same consumer lease during long Codex runs, and stop
+  the child process if ownership is lost.
+- Treat active Desk fingerprint matches as another occurrence of the existing issue without starting a second
+  Agent, and skip centrally settled tickets after a monitor restart.
+
 ## 0.1.33 - 2026-09-06
 
 ### Fixed

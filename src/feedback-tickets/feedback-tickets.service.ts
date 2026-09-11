@@ -224,11 +224,14 @@ export class FeedbackTicketsService {
   async updateClaimed(id: string, dto: ClaimedFeedbackTicketUpdateDto) {
     const ticket = await this.prisma.feedbackTicket.findUnique({ where: { id } });
     if (!ticket) throw new NotFoundException("feedback ticket not found");
+    const now = new Date();
     const claimed = Boolean(
       ticket.claimTokenHash
+      && ticket.claimExpiresAt
+      && ticket.claimExpiresAt.getTime() > now.getTime()
       && hashMatches(tokenHash(dto.claimToken), ticket.claimTokenHash),
     );
-    if (!claimed) throw new UnauthorizedException("feedback ticket claim is invalid or superseded");
+    if (!claimed) throw new UnauthorizedException("feedback ticket claim is expired, invalid, or superseded");
     const { claimToken: _claimToken, ...update } = dto;
     return this.transition(id, update, ticket.claimOwner || "feedback-monitor");
   }

@@ -16,7 +16,7 @@ test("repository-managed Feishu monitor passes its deterministic self-test", () 
   assert.match(result.stdout, /self-test passed/);
 });
 
-test("monitor claims one Control ticket before replying and keeps the credential out of argv", () => {
+test("monitor claims one Control ticket, mirrors Desk, and keeps both credentials out of argv", () => {
   const monitor = readFileSync(monitorPath, "utf8");
   const installer = readFileSync(join(root, "scripts", "install-hara-feishu-monitor.sh"), "utf8");
 
@@ -34,11 +34,23 @@ test("monitor claims one Control ticket before replying and keeps the credential
   assert.match(monitor, /startup quarantined stale queue/);
   assert.match(monitor, /Control intake unavailable; reply and worker paused/);
   assert.match(monitor, /X-Hara-Feedback-Key/);
-  assert.match(monitor, /os\.open\(CONTROL_KEY_FILE/);
+  assert.match(monitor, /X-Desk-Intake-Key/);
+  assert.match(monitor, /sync_desk_intake/);
+  assert.match(monitor, /Desk intake unavailable; reply and worker paused/);
+  assert.match(monitor, /deskDuplicate.*fingerprint/);
+  assert.match(monitor, /pendingTransition/);
+  assert.match(monitor, /apply_pending_transition\(path, record\)/);
+  assert.match(monitor, /ticket transition unavailable; processing paused/);
+  assert.match(monitor, /ready-to-start-worker/);
+  assert.match(monitor, /os\.open\(key_file/);
   assert.match(monitor, /handle\.read\(4096\)/);
   assert.doesNotMatch(monitor, /LOGGER\.[a-z]+\([^\n]*\bkey\b[^\n]*\)/i);
   assert.match(installer, /HARA_FEEDBACK_INTAKE_KEY_FILE/);
   assert.match(installer, /HARA_FEISHU_MAX_RESTART_CATCHUP_SECONDS/);
+  assert.match(installer, /HARA_FEEDBACK_DESK_URL/);
+  assert.match(installer, /HARA_FEEDBACK_DESK_KEY_FILE/);
+  assert.match(installer, /--desk-url/);
+  assert.match(installer, /--desk-key-file/);
   assert.match(installer, /--max-restart-catchup-seconds/);
   assert.doesNotMatch(installer, /HARA_FEEDBACK_INTAKE_KEY=/);
 });

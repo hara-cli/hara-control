@@ -1,7 +1,9 @@
 # Hara feedback ticket workflow
 
 Hara Control is the source of truth for product feedback. Feishu remains the canonical human intake
-and status channel, but it is not used as a database or a distributed lock.
+and status channel, but it is not used as a database or a distributed lock. Hara Desk is the unified
+human/Agent workbench: the monitor mirrors each accepted source and lifecycle transition into Desk,
+while Control remains authoritative for ticket numbering and the single processing lease.
 
 ## Lifecycle
 
@@ -38,6 +40,9 @@ The monitor uses four complementary boundaries:
 - Thread reconciliation is fail-closed: if Feishu cannot confirm whether a handler reply already exists, the
   monitor pauses the acknowledgment and worker instead of assuming no reply exists.
 - The local monitor also uses one process lock and owner-only queue records.
+- Desk also enforces exact Feishu source idempotency and merges a new message into the same active issue
+  by a normalized fingerprint. A fingerprint match records another occurrence but does not launch a
+  second Agent or let the duplicate monitor record change the shared Desk task lifecycle.
 
 If Control is temporarily unreachable, the monitor keeps the existing deterministic local ticket ID
 and thread reconciliation instead of silently dropping feedback. Once Control is configured, its
@@ -55,6 +60,11 @@ files. PM2 and LaunchAgent store only file paths; neither receives the value in 
 environment. The credential never enters process arguments, logs, git, or Feishu. External fields pass through
 the same credential/path redactor used by crash intake before persistence.
 
+Desk uses a separate purpose-scoped intake credential in another `0600` file. Never reuse the Control,
+Desk enrollment, provider, Feishu, JWT, or administrator credential for this purpose. If either configured
+backend cannot accept the intake, the monitor persists the queue item and pauses before replying or starting
+Codex; recovery resumes from the same Feishu message ID.
+
 ## Operator console
 
 SUPERADMIN users see **Tickets / 工单** in `/console/`. The inbox filters by state, kind, and priority;
@@ -69,6 +79,8 @@ The repository-managed monitor is `scripts/hara-feishu-monitor.py`. Install it w
 bash scripts/install-hara-feishu-monitor.sh \
   --control-url https://gw.nanhara.tech \
   --key-file "$HOME/.codex/automations/hara-feishu-monitor/credentials/control-feedback.key" \
+  --desk-url https://desk.nanhara.tech \
+  --desk-key-file "$HOME/.codex/automations/hara-feishu-monitor/credentials/desk-feedback.key" \
   --max-restart-catchup-seconds 900
 ```
 

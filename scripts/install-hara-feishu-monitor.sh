@@ -3,6 +3,7 @@ set -euo pipefail
 
 CONTROL_URL=""
 KEY_FILE=""
+MAX_RESTART_CATCHUP_SECONDS="900"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --control-url)
@@ -11,6 +12,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --key-file)
       KEY_FILE="${2:-}"
+      shift 2
+      ;;
+    --max-restart-catchup-seconds)
+      MAX_RESTART_CATCHUP_SECONDS="${2:-}"
       shift 2
       ;;
     *)
@@ -28,6 +33,11 @@ esac
 [ -n "$KEY_FILE" ] || { echo "--key-file is required" >&2; exit 2; }
 [ -f "$KEY_FILE" ] || { echo "key file does not exist: $KEY_FILE" >&2; exit 2; }
 [ ! -L "$KEY_FILE" ] || { echo "key file must not be a symbolic link" >&2; exit 2; }
+case "$MAX_RESTART_CATCHUP_SECONDS" in
+  ''|*[!0-9]*) echo "--max-restart-catchup-seconds must be an integer from 0 to 21600" >&2; exit 2 ;;
+esac
+[ "$MAX_RESTART_CATCHUP_SECONDS" -le 21600 ] \
+  || { echo "--max-restart-catchup-seconds must be an integer from 0 to 21600" >&2; exit 2; }
 key_mode="$(stat -f '%Lp' "$KEY_FILE")"
 [ "$key_mode" = "600" ] || { echo "key file must use mode 600" >&2; exit 2; }
 key_owner="$(stat -f '%u' "$KEY_FILE")"
@@ -56,6 +66,7 @@ set_plist_value() {
 }
 set_plist_value HARA_FEEDBACK_CONTROL_URL "$CONTROL_URL"
 set_plist_value HARA_FEEDBACK_INTAKE_KEY_FILE "$KEY_FILE"
+set_plist_value HARA_FEISHU_MAX_RESTART_CATCHUP_SECONDS "$MAX_RESTART_CATCHUP_SECONDS"
 chmod 600 "$PLIST"
 
 launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true

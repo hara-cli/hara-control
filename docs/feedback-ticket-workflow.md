@@ -30,6 +30,13 @@ The monitor uses four complementary boundaries:
   `【Codex · Hara 反馈处理】` reply. If a foreground Codex session replied first, the monitor records the
   acknowledgment but does not start a second worker or add another bot message. If its own durable
   `ackInFlight` marker predates that reply, it resumes the already-owned job after a crash.
+- A restart only catches up messages from the most recent 15 minutes by default. Older unread messages
+  advance the Feishu cursor but are quarantined locally under `data/skipped/`; they do not receive an
+  acknowledgment and cannot start an Agent. Existing stale queue entries are quarantined before the worker
+  starts. Set `--max-restart-catchup-seconds` from `0` through `21600` when installing if a different bounded
+  recovery window is required.
+- Thread reconciliation is fail-closed: if Feishu cannot confirm whether a handler reply already exists, the
+  monitor pauses the acknowledgment and worker instead of assuming no reply exists.
 - The local monitor also uses one process lock and owner-only queue records.
 
 If Control is temporarily unreachable, the monitor keeps the existing deterministic local ticket ID
@@ -61,7 +68,8 @@ The repository-managed monitor is `scripts/hara-feishu-monitor.py`. Install it w
 ```bash
 bash scripts/install-hara-feishu-monitor.sh \
   --control-url https://gw.nanhara.tech \
-  --key-file "$HOME/.codex/automations/hara-feishu-monitor/credentials/control-feedback.key"
+  --key-file "$HOME/.codex/automations/hara-feishu-monitor/credentials/control-feedback.key" \
+  --max-restart-catchup-seconds 900
 ```
 
 The installer preserves queue/history/log data, copies only the executable, records only the non-secret

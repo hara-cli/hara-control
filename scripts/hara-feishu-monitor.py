@@ -38,6 +38,11 @@ CHAT_ID = "oc_17590648f393135cde6a6b9cd6f1c710"
 MENTION = "@南荒bot"
 MENTION_NAME = MENTION.removeprefix("@")
 IDENTITY_PREFIX = "【Codex · Hara 反馈处理】"
+HANDLER_REPLY_PREFIXES = (
+    IDENTITY_PREFIX,
+    "【总控台】",
+    "【Claude Code · Hara 反馈处理】",
+)
 CRASH_ALERT_PREFIX = "【Hara Crash Intake · 自动告警】"
 TRUSTED_ALERT_SENDER_ID = os.environ.get(
     "HARA_CRASH_ALERT_SENDER_ID",
@@ -53,6 +58,7 @@ DATA_DIR = AUTOMATION_DIR / "data"
 QUEUE_DIR = DATA_DIR / "queue"
 DONE_DIR = DATA_DIR / "done"
 FAILED_DIR = DATA_DIR / "failed"
+SKIPPED_DIR = DATA_DIR / "skipped"
 LOG_DIR = AUTOMATION_DIR / "logs"
 WATCH_STATE = DATA_DIR / "feishu-watch.json"
 PROCESS_LOCK = DATA_DIR / "monitor.lock"
@@ -85,6 +91,10 @@ CONTROL_KEY_FILE = Path(os.environ.get(
 )).expanduser()
 MESSAGE_ID_RE = re.compile(r"^om_[A-Za-z0-9]+$")
 POLL_SECONDS = max(15, min(300, int(os.environ.get("HARA_FEISHU_POLL_SECONDS", "60"))))
+MAX_RESTART_CATCHUP_SECONDS = max(
+    0,
+    min(6 * 3600, int(os.environ.get("HARA_FEISHU_MAX_RESTART_CATCHUP_SECONDS", "900"))),
+)
 MAX_ATTEMPTS = 3
 MAX_COMPLETED_RECORDS = 1000
 MAX_RECORD_AGE_SECONDS = 90 * 86400
@@ -235,6 +245,24 @@ def load_json(path: Path) -> dict[str, Any]:
     except (OSError, UnicodeError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def source_created_at_ms(value: dict[str, Any]) -> int:
+    for key in ("create_time_ms", "createdAtMs"):
+        try:
+            created_at_ms = int(value.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if created_at_ms > 0:
+            return created_at_ms
+    return 0
+
+
+def predates_restart_catchup_window(value: dict[str, Any], process_started_at_ms: int) -> bool:
+    created_at_ms = source_created_at_ms(value)
+    if created_at_ms <= 0:
+        return True
+    return created_at_ms < process_started_at_ms - MAX_RESTART_CATCHUP_SECONDS * 1000
 
 
 def setup_logging() -> logging.Logger:
@@ -402,21 +430,20 @@ def record_path(directory: Path, message_id: str) -> Path:
     return directory / f"{message_id}.json"
 
 
-def enqueue(value: dict[str, Any]) -> bool:
-    message_id = str(value["message_id"])
-    ticket_id = ticket_id_for_message(value)
-    queued = record_path(QUEUE_DIR, message_id)
-    if any(record_path(directory, message_id).exists() for directory in (QUEUE_DIR, DONE_DIR, FAILED_DIR)):
-        return False
+def record_directories() -> tuple[Path, ...]:
+    return (QUEUE_DIR, DONE_DIR, FAILED_DIR, SKIPPED_DIR)
+
+
+def build_record(value: dict[str, Any]) -> dict[str, Any]:
     title, summary = ticket_summary_for_message(value)
-    record = {
-        "messageId": message_id,
-        "ticketId": ticket_id,
+    return {
+        "messageId": str(value["message_id"]),
+        "ticketId": ticket_id_for_message(value),
         "sourceKind": source_kind(value),
         "senderId": sanitize_feedback_text(str(value.get("sender_id") or ""), 200),
         "ticketTitle": title,
         "ticketSummary": summary,
-        "createdAtMs": int(value.get("create_time_ms") or 0),
+        "createdAtMs": source_created_at_ms(value),
         "queuedAt": int(time.time()),
         "ticketStatus": "RECEIVED",
         "acknowledged": False,
@@ -424,6 +451,14 @@ def enqueue(value: dict[str, Any]) -> bool:
         "attempts": 0,
         "nextAttemptAt": 0,
     }
+
+
+def enqueue(value: dict[str, Any]) -> bool:
+    message_id = str(value["message_id"])
+    queued = record_path(QUEUE_DIR, message_id)
+    if any(record_path(directory, message_id).exists() for directory in record_directories()):
+        return False
+    record = build_record(value)
     # Persist the local work item before any network request. If the process exits after Control
     # grants a lease but before the response is saved, the same stable consumer can reclaim it from
     # this queue on restart; advancing Feishu watch state therefore cannot lose the issue.
@@ -436,16 +471,37 @@ def enqueue(value: dict[str, Any]) -> bool:
     return True
 
 
+def store_skipped_replay(value: dict[str, Any], process_started_at_ms: int) -> bool:
+    message_id = str(value["message_id"])
+    if any(record_path(directory, message_id).exists() for directory in record_directories()):
+        return False
+    record = build_record(value)
+    record.update({
+        "status": "stale-replay-skipped",
+        "ticketStatus": "REJECTED",
+        "skipReason": "restart-catchup-window-exceeded",
+        "skippedAt": int(time.time()),
+        "restartCutoffMs": process_started_at_ms - MAX_RESTART_CATCHUP_SECONDS * 1000,
+    })
+    atomic_json(record_path(SKIPPED_DIR, message_id), record)
+    LOGGER.info(
+        "skipped stale replay ticket_id=%s message_id=%s",
+        record.get("ticketId"),
+        message_id,
+    )
+    return True
+
+
 def is_codex_thread_reply(item: Any, message_id: str) -> bool:
     return bool(
         isinstance(item, dict)
         and str(item.get("parent_id") or item.get("root_id") or "") == message_id
         and str(item.get("sender_type") or "") == "app"
-        and str(item.get("text") or "").strip().startswith(IDENTITY_PREFIX)
+        and str(item.get("text") or "").strip().startswith(HANDLER_REPLY_PREFIXES)
     )
 
 
-def recent_codex_reply_exists(message_id: str) -> bool:
+def recent_codex_reply_exists(message_id: str) -> bool | None:
     result = run_helper(
         [
             "messages",
@@ -456,7 +512,7 @@ def recent_codex_reply_exists(message_id: str) -> bool:
             "--limit",
             "500",
             "--keywords",
-            IDENTITY_PREFIX,
+            ",".join(HANDLER_REPLY_PREFIXES),
             "--preview-limit",
             "100",
             "--latest",
@@ -464,14 +520,21 @@ def recent_codex_reply_exists(message_id: str) -> bool:
         timeout=90,
     )
     if result.returncode != 0:
-        return False
+        LOGGER.warning(
+            "Feishu thread reconciliation failed message_id=%s exit=%s; acknowledgment paused",
+            message_id,
+            result.returncode,
+        )
+        return None
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return False
+        LOGGER.warning("Feishu thread reconciliation returned invalid JSON message_id=%s; acknowledgment paused", message_id)
+        return None
     preview = payload.get("preview") if isinstance(payload, dict) else []
     if not isinstance(preview, list):
-        return False
+        LOGGER.warning("Feishu thread reconciliation returned no preview message_id=%s; acknowledgment paused", message_id)
+        return None
     return any(is_codex_thread_reply(item, message_id) for item in preview)
 
 
@@ -515,7 +578,14 @@ def ensure_acknowledged(path: Path, record: dict[str, Any]) -> bool:
     # Always reconcile against the remote thread before replying. A foreground Codex session may have
     # acknowledged the same report after it was queued but before this worker acquired it; limiting this
     # check to ackInFlight caused duplicate acknowledgments in the feedback group.
-    if recent_codex_reply_exists(message_id):
+    existing_reply = recent_codex_reply_exists(message_id)
+    if existing_reply is None:
+        record["ackReconcileStatus"] = "unavailable"
+        record["nextAttemptAt"] = int(time.time()) + 60
+        atomic_json(path, record)
+        return False
+    record["ackReconcileStatus"] = "complete"
+    if existing_reply:
         record["acknowledged"] = True
         record["ackInFlight"] = False
         record["acknowledgedByExistingReply"] = True
@@ -629,6 +699,38 @@ def finish_record(source: Path, destination_dir: Path, record: dict[str, Any]) -
     source.unlink(missing_ok=True)
 
 
+def quarantine_stale_queue_records(process_started_at_ms: int) -> int:
+    skipped = 0
+    for queued_path in sorted(QUEUE_DIR.glob("om_*.json"), key=lambda item: item.stat().st_mtime):
+        record = load_json(queued_path)
+        if not predates_restart_catchup_window(record, process_started_at_ms):
+            continue
+        previous_status = str(record.get("ticketStatus") or "RECEIVED")
+        record.update({
+            "previousTicketStatus": previous_status,
+            "status": "stale-replay-skipped",
+            "ticketStatus": "REJECTED",
+            "skipReason": "restart-catchup-window-exceeded",
+            "skippedAt": int(time.time()),
+            "restartCutoffMs": process_started_at_ms - MAX_RESTART_CATCHUP_SECONDS * 1000,
+        })
+        if record.get("controlTicketId") and record.get("controlClaimToken"):
+            sync_control_transition(
+                record,
+                "REJECTED",
+                "Local monitor restart skipped an expired catch-up item before sending another reply.",
+            )
+        finish_record(queued_path, SKIPPED_DIR, record)
+        skipped += 1
+        LOGGER.info(
+            "quarantined stale queue ticket_id=%s message_id=%s previous_status=%s",
+            record.get("ticketId"),
+            record.get("messageId"),
+            previous_status,
+        )
+    return skipped
+
+
 def process_record(path: Path) -> None:
     record = load_json(path)
     message_id = str(record.get("messageId") or "")
@@ -642,6 +744,16 @@ def process_record(path: Path) -> None:
     if CONTROL_BASE_URL and not record.get("controlTicketId"):
         record["controlIntakeAttempted"] = True
         record["controlIntakeAvailable"] = sync_control_intake(record)
+        if not record["controlIntakeAvailable"]:
+            record["status"] = "waiting-for-control"
+            record["nextAttemptAt"] = now + 60
+            atomic_json(path, record)
+            LOGGER.warning(
+                "Control intake unavailable; reply and worker paused ticket_id=%s message_id=%s",
+                record.get("ticketId"),
+                message_id,
+            )
+            return
         atomic_json(path, record)
     if record.get("controlTicketId") and not bool(record.get("controlClaimGranted")):
         record["status"] = "claimed-by-another-worker"
@@ -729,13 +841,14 @@ def worker_loop() -> None:
                 process_record(path)
             prune_records(DONE_DIR)
             prune_records(FAILED_DIR)
+            prune_records(SKIPPED_DIR)
         except Exception:
             LOGGER.exception("worker loop failed")
         WAKE_WORKER.wait(timeout=15)
         WAKE_WORKER.clear()
 
 
-def poll_once() -> int:
+def poll_once(process_started_at_ms: int) -> int:
     result = run_helper(
         [
             "watch",
@@ -760,7 +873,12 @@ def poll_once() -> int:
             value = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(value, dict) and eligible_message(value) and enqueue(value):
+        if not isinstance(value, dict) or not eligible_message(value):
+            continue
+        if predates_restart_catchup_window(value, process_started_at_ms):
+            store_skipped_replay(value, process_started_at_ms)
+            continue
+        if enqueue(value):
             queued += 1
     if queued:
         WAKE_WORKER.set()
@@ -777,7 +895,7 @@ def validate_installation() -> None:
     if CONTROL_BASE_URL:
         read_control_key()
         load_or_create_consumer_id()
-    for directory in (AUTOMATION_DIR, DATA_DIR, QUEUE_DIR, DONE_DIR, FAILED_DIR, LOG_DIR):
+    for directory in (AUTOMATION_DIR, DATA_DIR, QUEUE_DIR, DONE_DIR, FAILED_DIR, SKIPPED_DIR, LOG_DIR):
         ensure_private_directory(directory)
 
 
@@ -847,6 +965,22 @@ def self_test() -> int:
         "sender_type": "app",
         "text": "普通 Hara Agent 回复",
     }, "om_Test123")
+    assert is_codex_thread_reply({
+        "parent_id": "om_Test123",
+        "sender_type": "app",
+        "text": "【总控台】已人工接管",
+    }, "om_Test123")
+    process_started_at_ms = 2_000_000_000_000
+    assert not predates_restart_catchup_window(
+        {"create_time_ms": process_started_at_ms},
+        process_started_at_ms,
+    )
+    assert predates_restart_catchup_window(
+        {"create_time_ms": process_started_at_ms - MAX_RESTART_CATCHUP_SECONDS * 1000 - 1},
+        process_started_at_ms,
+    )
+    assert predates_restart_catchup_window({}, process_started_at_ms)
+    assert SKIPPED_DIR in record_directories()
     assert TICKET_ID_RE.fullmatch("HARA-000001")
     assert "topsecret" not in sanitize_feedback_text("token=topsecret /Users/alice/private", 200)
     assert "alice" not in sanitize_feedback_text("token=topsecret /Users/alice/private", 200)
@@ -875,21 +1009,29 @@ def main() -> int:
         return self_test()
     LOGGER = setup_logging()
     validate_installation()
+    process_started_at_ms = int(time.time() * 1000)
     try:
         process_lock = acquire_process_lock()
     except BlockingIOError:
         return 0
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
+    stale_queue_count = quarantine_stale_queue_records(process_started_at_ms)
+    if stale_queue_count:
+        LOGGER.info(
+            "startup quarantined stale queue count=%s catchup_seconds=%s",
+            stale_queue_count,
+            MAX_RESTART_CATCHUP_SECONDS,
+        )
     if args.once:
-        poll_once()
+        poll_once(process_started_at_ms)
         return 0
     worker = threading.Thread(target=worker_loop, name="codex-worker", daemon=True)
     worker.start()
     LOGGER.info("monitor started idle_model_tokens=0 poll_seconds=%s", POLL_SECONDS)
     try:
         while not STOP_EVENT.is_set():
-            poll_once()
+            poll_once(process_started_at_ms)
             STOP_EVENT.wait(POLL_SECONDS)
     finally:
         STOP_EVENT.set()

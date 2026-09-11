@@ -8,7 +8,10 @@ import { MockGatewayAdapter } from "../src/gateway/mock.adapter";
 import type { GatewayAdapter } from "../src/gateway/gateway-adapter";
 import type { PrismaService } from "../src/prisma/prisma.service";
 import type { AuditService } from "../src/audit/audit.service";
-import type { DeskProvisioner } from "../src/enroll/desk-provisioner";
+import {
+  DeskProvisioningFailure,
+  type DeskProvisioner,
+} from "../src/enroll/desk-provisioner";
 import type { TenantServiceBindingsService } from "../src/service-bindings/service-bindings.service";
 
 type Code = {
@@ -27,7 +30,19 @@ type Code = {
   tpmLimit?: number | null;
   personId?: string | null;
 };
-type Dev = { id: string; orgId: string; name: string; os: string; haraVersion: string; lastSeenAt: Date; enrollCodeId: string };
+type Dev = {
+  id: string;
+  orgId: string;
+  name: string;
+  os: string;
+  haraVersion: string;
+  lastSeenAt: Date;
+  enrollCodeId: string;
+  deskProvisionedAt?: Date | null;
+  deskCleanupPendingAt?: Date | null;
+  deskOwner?: string | null;
+  deskOrigin?: string | null;
+};
 type Tok = {
   id: string;
   deviceId: string;
@@ -52,10 +67,19 @@ function fakePrisma() {
       findUnique: async ({ where: { id } }: { where: { id: string } }) => ({ id, name: `Organization ${id}` }),
     },
     person: {
-      findUnique: async ({ where: { id } }: { where: { id: string } }) => ({ id, orgId: "o1", email: `${id}@example.test` }),
+      findUnique: async ({ where: { id } }: { where: { id: string } }) => ({
+        id,
+        orgId: id.startsWith("person-") ? id.slice("person-".length) : "o1",
+        email: `${id}@example.test`,
+      }),
     },
     enrollCode: {
-      findUnique: async ({ where: { code } }: { where: { code: string } }) => db.codes.get(code) ?? null,
+      findUnique: async ({ where: { code } }: { where: { code: string } }) => {
+        const entry = db.codes.get(code);
+        return entry && entry.personId === undefined
+          ? { ...entry, personId: `person-${entry.orgId}` }
+          : entry ?? null;
+      },
       updateMany: async ({
         where,
         data,
@@ -107,8 +131,15 @@ function fakePrisma() {
         db.tokens.push(t);
         return t;
       },
-      findUnique: async ({ where: { tokenHash } }: { where: { tokenHash: string } }) =>
-        db.tokens.find((t) => t.tokenHash === tokenHash) ?? null,
+      findUnique: async ({ where: { tokenHash }, include }: {
+        where: { tokenHash: string };
+        include?: { device?: unknown };
+      }) => {
+        const token = db.tokens.find((t) => t.tokenHash === tokenHash) ?? null;
+        if (!token || !include?.device) return token;
+        const device = db.devices.get(token.deviceId);
+        return device ? { ...token, device: { ...device, person: null } } : null;
+      },
     },
   };
   return prisma;
@@ -134,6 +165,39 @@ test("enroll: a legacy cross-organization Person binding fails before consuming 
     /bad or expired code/,
   );
   assert.equal(prisma.db.codes.get("hara-cross-org")?.usedAt, null);
+  assert.equal(prisma.db.devices.size, 0);
+});
+
+test("enroll: an unassigned legacy code cannot turn a client-controlled device name into Desk owner", async () => {
+  const prisma = fakePrisma();
+  prisma.db.codes.set("hara-unassigned", {
+    id: "c-unassigned",
+    orgId: "o1",
+    code: "hara-unassigned",
+    model: "glm-5",
+    baseUrl: null,
+    personId: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    usedAt: null,
+  });
+  let issued = false;
+  const gateway = {
+    ...new MockGatewayAdapter(),
+    issueKey: async () => {
+      issued = true;
+      throw new Error("must not reach gateway");
+    },
+  } as unknown as GatewayAdapter;
+  await assert.rejects(
+    svcFor(prisma, gateway).enroll("hara-unassigned", {
+      name: "jeff",
+      os: "darwin",
+      hara_version: "0.173.0",
+    }),
+    /bad or expired code/,
+  );
+  assert.equal(issued, false);
+  assert.equal(prisma.db.codes.get("hara-unassigned")?.usedAt, null);
   assert.equal(prisma.db.devices.size, 0);
 });
 
@@ -188,15 +252,35 @@ test("enroll: configured organization returns model access and a separate Desk b
     expiresAt: new Date(Date.now() + 60_000),
     usedAt: null,
   });
-  let provisionInput: { orgId: string; owner: string; deviceName: string } | undefined;
+  let provisionInput: {
+    orgId: string;
+    owner: string;
+    deviceName: string;
+    installationId: string;
+    platform: string;
+    version: string;
+    clientKind: string;
+  } | undefined;
+  let released = false;
+  let prepared = false;
   const deskProvisioner = {
-    provision: async (input: { orgId: string; owner: string; deviceName: string }) => {
+    provisionForEnrollment: async (
+      input: NonNullable<typeof provisionInput>,
+      options: { onPrepared?: (target: { url: string }) => Promise<void> },
+    ) => {
       provisionInput = input;
-      return {
+      await options.onPrepared?.({ url: "https://desk.example.test" });
+      prepared = true;
+      const binding = {
         url: "https://desk.example.test",
         agent_id: "desk-device-1",
         owner: input.owner,
         token: "separate-desk-bearer",
+      };
+      return {
+        binding,
+        release: () => { released = true; },
+        compensate: async () => { released = true; },
       };
     },
   } as unknown as DeskProvisioner;
@@ -214,14 +298,106 @@ test("enroll: configured organization returns model access and a separate Desk b
   assert.deepEqual(result.desk, {
     url: "https://desk.example.test",
     agent_id: "desk-device-1",
-    owner: "bundle-mac",
+    owner: "person-o-bundle@example.test",
     token: "separate-desk-bearer",
   });
   assert.deepEqual(provisionInput, {
     orgId: "o-bundle",
-    owner: "bundle-mac",
+    owner: "person-o-bundle@example.test",
     deviceName: "bundle-mac",
+    installationId: prisma.db.tokens[0].deviceId,
+    platform: "darwin",
+    version: "0.136.0",
+    clientKind: "nanhara.hara-desktop",
   });
+  const device = prisma.db.devices.get(result.device_id)!;
+  assert.ok(device.deskProvisionedAt instanceof Date);
+  assert.equal(device.deskOwner, "person-o-bundle@example.test");
+  assert.equal(device.deskOrigin, "https://desk.example.test");
+  assert.equal(device.deskCleanupPendingAt ?? null, null);
+  assert.equal(prepared, true, "cleanup provenance is persisted before remote registration");
+  assert.equal(released, true, "Control forgets the captured enrollment credential after commit");
+});
+
+test("an enrolled device can provision separate idempotent Hara, Claude Code, and Codex Agent identities", async () => {
+  const prisma = fakePrisma();
+  prisma.db.codes.set("hara-agent-clients", {
+    id: "c-agent-clients",
+    orgId: "o-agent-clients",
+    code: "hara-agent-clients",
+    model: "glm-5",
+    baseUrl: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    usedAt: null,
+  });
+  const provisionInputs: Array<Record<string, unknown>> = [];
+  const bindingFor = (input: Record<string, unknown>) => ({
+    url: "https://desk.example.test",
+    agent_id: `agent-${String(input.clientKind)}`,
+    owner: String(input.owner),
+    token: `one-time-${String(input.clientKind)}`,
+  });
+  const deskProvisioner = {
+    provisionForEnrollment: async (
+      input: Record<string, unknown>,
+      options: { onPrepared?: (target: { url: string }) => Promise<void> },
+    ) => {
+      provisionInputs.push(input);
+      await options.onPrepared?.({ url: "https://desk.example.test" });
+      return {
+        binding: bindingFor(input),
+        release: () => undefined,
+        compensate: async () => undefined,
+      };
+    },
+    provision: async (input: Record<string, unknown>) => {
+      provisionInputs.push(input);
+      return bindingFor(input);
+    },
+  } as unknown as DeskProvisioner;
+  const service = svcFor(prisma, new MockGatewayAdapter(), deskProvisioner);
+  const enrollment = await service.enroll("hara-agent-clients", {
+    name: "agent-mac",
+    os: "darwin",
+    hara_version: "0.173.0",
+  });
+
+  const codex = await service.provisionDeskAgent(enrollment.device_token, {
+    client_kind: "openai.codex",
+    instance_id: "work-account",
+    name: "Codex · Work",
+  });
+  assert.deepEqual(codex, {
+    desk: {
+      url: "https://desk.example.test",
+      agent_id: "agent-openai.codex",
+      owner: "person-o-agent-clients@example.test",
+      token: "one-time-openai.codex",
+    },
+    client_kind: "openai.codex",
+    instance_id: "work-account",
+  });
+  assert.equal(provisionInputs.length, 2);
+  assert.deepEqual(provisionInputs[1], {
+    orgId: "o-agent-clients",
+    owner: "person-o-agent-clients@example.test",
+    deviceName: "agent-mac",
+    installationId: enrollment.device_id,
+    platform: "darwin",
+    version: "0.173.0",
+    clientKind: "openai.codex",
+    instanceId: "work-account",
+    agentName: "Codex · Work",
+    expectedUrl: "https://desk.example.test",
+  });
+  await assert.rejects(
+    service.provisionDeskAgent(enrollment.device_token, {
+      client_kind: "openai.codex",
+      instance_id: "Work-Account",
+    }),
+    /lowercase letters/,
+  );
+  assert.equal(provisionInputs.length, 2, "non-canonical instance ids never reach Desk");
 });
 
 test("enroll: one exchange returns only active redacted organization service descriptors", async () => {
@@ -307,7 +483,7 @@ test("enroll: a Desk provisioning failure rolls back model access, restores the 
     },
   } as unknown as AuditService;
   const deskProvisioner = {
-    provision: async () => {
+    provisionForEnrollment: async () => {
       throw new Error("Desk rejected server-held-secret-value");
     },
   } as unknown as DeskProvisioner;
@@ -349,6 +525,8 @@ test("enroll: a Desk provisioning failure rolls back model access, restores the 
         actorType: "system",
         payload: {
           gatewayRevoked: true,
+          deskRevoked: true,
+          deskCleanupPending: false,
           deviceRemoved: true,
           codeRestored: true,
         },
@@ -360,6 +538,58 @@ test("enroll: a Desk provisioning failure rolls back model access, restores the 
     false,
     "rollback audit never records the upstream error or secret",
   );
+});
+
+test("enroll: inconclusive Desk registration remains visible and revocable instead of becoming an orphan", async () => {
+  const prisma = fakePrisma();
+  prisma.db.codes.set("hara-desk-pending", {
+    id: "c-desk-pending",
+    orgId: "o-desk-pending",
+    code: "hara-desk-pending",
+    model: "glm-5",
+    baseUrl: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    usedAt: null,
+  });
+  const auditEvents: Array<{ action: string; payload: Record<string, unknown> }> = [];
+  const deskProvisioner = {
+    provisionForEnrollment: async () => {
+      throw new DeskProvisioningFailure(false, "https://desk.example.test");
+    },
+  } as unknown as DeskProvisioner;
+  const audit = {
+    log: async (
+      _orgId: string,
+      action: string,
+      _actorType: string,
+      _actorId: string,
+      payload: Record<string, unknown>,
+    ) => { auditEvents.push({ action, payload }); },
+  } as unknown as AuditService;
+
+  await assert.rejects(
+    svcFor(prisma, new MockGatewayAdapter(), deskProvisioner, audit).enroll(
+      "hara-desk-pending",
+      { name: "bundle-mac", os: "darwin", hara_version: "0.173.0" },
+    ),
+    /remote rollback could not be confirmed/,
+  );
+
+  assert.equal(prisma.db.devices.size, 1, "cleanup provenance keeps the device for admin revocation");
+  const [device] = [...prisma.db.devices.values()];
+  assert.equal(device.deskProvisionedAt ?? null, null);
+  assert.ok(device.deskCleanupPendingAt instanceof Date);
+  assert.equal(device.deskOrigin, "https://desk.example.test");
+  assert.equal(device.deskOwner, "person-o-desk-pending@example.test");
+  assert.ok(prisma.db.codes.get("hara-desk-pending")?.usedAt instanceof Date);
+  assert.equal(auditEvents.at(-1)?.action, "enroll.rollback");
+  assert.deepEqual(auditEvents.at(-1)?.payload, {
+    gatewayRevoked: true,
+    deskRevoked: false,
+    deskCleanupPending: true,
+    deviceRemoved: false,
+    codeRestored: false,
+  });
 });
 
 test("enroll: applies and persists the admin-issued lifetime, rolling budgets, RPM, and TPM", async () => {

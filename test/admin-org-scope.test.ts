@@ -320,22 +320,56 @@ test("device revoke fails closed on gateway error and audits the real actor atom
   let localUpdates = 0;
   let transactions = 0;
   const auditCalls: unknown[][] = [];
+  let revocationRequestedAt: Date | null = null;
+  let revocationCompletedAt: Date | null = null;
+  const tokenRows = [
+    { id: "token-1", gatewayKeyId: "key-1", revokedAt: null as Date | null },
+    { id: "token-2", gatewayKeyId: "key-2", revokedAt: null as Date | null },
+  ];
   const prisma = {
-    device: { findUnique: async () => ({ id: "device-1", orgId: "org-a" }) },
+    device: {
+      findUnique: async () => ({
+        id: "device-1",
+        orgId: "org-a",
+        revocationRequestedAt,
+        revocationCompletedAt,
+        deskProvisionedAt: null,
+        deskCleanupPendingAt: null,
+      }),
+      updateMany: async ({ data }: { data: { revocationRequestedAt: Date } }) => {
+        if (revocationRequestedAt) return { count: 0 };
+        revocationRequestedAt = data.revocationRequestedAt;
+        return { count: 1 };
+      },
+      update: async ({ data }: { data: { revocationCompletedAt: Date } }) => {
+        revocationCompletedAt = data.revocationCompletedAt;
+        return {};
+      },
+    },
     deviceToken: {
-      findMany: async () => [
-        { id: "token-1", gatewayKeyId: "key-1" },
-        { id: "token-2", gatewayKeyId: "key-2" },
-      ],
-      updateMany: async () => { localUpdates += 1; return { count: 2 }; },
+      findMany: async () => tokenRows,
+      updateMany: async ({ data }: { data: { revokedAt: Date } }) => {
+        localUpdates += 1;
+        let count = 0;
+        for (const token of tokenRows) {
+          if (!token.revokedAt) {
+            token.revokedAt = data.revokedAt;
+            count += 1;
+          }
+        }
+        return { count };
+      },
     },
   };
   let failSecond = true;
   const revoked: string[] = [];
+  const remoteKeys = new Set(["key-1", "key-2"]);
   const gateway = {
     revokeKey: async (keyId: string) => {
       revoked.push(keyId);
+      if (!remoteKeys.has(keyId)) return; // idempotent: prior attempt already removed this alias
       if (keyId === "key-2" && failSecond) throw new Error("gateway unavailable");
+      remoteKeys.delete(keyId);
     },
   };
   const audit = {
@@ -355,14 +389,186 @@ test("device revoke fails closed on gateway error and audits the real actor atom
   const actor = { id: "admin-real", email: "admin@example.test", role: AdminRole.ADMIN, orgId: "org-a" };
 
   await assert.rejects(() => service.revokeDevice("device-1", actor), /gateway unavailable/);
-  assert.equal(localUpdates, 0, "no local token may look revoked while a remote key remains active");
-  assert.equal(transactions, 0);
+  assert.equal(localUpdates, 1, "local tokens must fail closed before a fallible remote revoke");
+  assert.ok(revocationRequestedAt);
+  assert.equal(revocationCompletedAt, null);
+  assert.ok(tokenRows.every((token) => token.revokedAt), "the original bearer cannot mint another Desk Agent");
+  assert.equal(transactions, 1);
 
   failSecond = false;
   const result = await service.revokeDevice("device-1", actor);
-  assert.deepEqual(result, { revoked: 2 });
-  assert.equal(localUpdates, 1);
-  assert.equal(transactions, 1);
-  assert.deepEqual(auditCalls[0].slice(0, 4), ["device.revoke", "admin", "admin-real", "org-a"]);
+  assert.deepEqual(result, { revoked: 2, deskRevoked: false });
+  assert.equal(localUpdates, 1, "retry reuses the persisted intent instead of rewriting it");
+  assert.equal(transactions, 2);
+  assert.ok(revocationCompletedAt);
+  assert.deepEqual([...remoteKeys], [], "retry continues past the already-missing first alias");
+  assert.deepEqual(auditCalls.map((call) => call.slice(0, 4)), [
+    ["device.revocation_requested", "admin", "admin-real", "org-a"],
+    ["device.revocation_completed", "admin", "admin-real", "org-a"],
+  ]);
   assert.deepEqual(revoked, ["key-1", "key-2", "key-1", "key-2"]);
+});
+
+test("a provisioned device revocation reaches Desk before Control records completion", async () => {
+  let locallyRevoked = false;
+  let deskBindingCleared = false;
+  let revocationRequestedAt: Date | null = null;
+  let revocationCompletedAt: Date | null = null;
+  const calls: unknown[] = [];
+  const prisma = {
+    device: {
+      findUnique: async () => ({
+        id: "device-desk",
+        orgId: "org-a",
+        deskProvisionedAt: new Date(),
+        deskCleanupPendingAt: null,
+        deskOwner: "member@example.test",
+        deskOrigin: "https://desk.example.test",
+        person: { email: "member@example.test" },
+        revocationRequestedAt,
+        revocationCompletedAt,
+      }),
+      updateMany: async ({ data }: { data: { revocationRequestedAt: Date } }) => {
+        revocationRequestedAt = data.revocationRequestedAt;
+        return { count: 1 };
+      },
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        revocationCompletedAt = data.revocationCompletedAt as Date;
+        deskBindingCleared = data.deskProvisionedAt === null
+          && data.deskCleanupPendingAt === null
+          && data.deskOwner === null
+          && data.deskOrigin === null;
+        return {};
+      },
+    },
+    deviceToken: {
+      findMany: async () => [{ id: "token-desk", gatewayKeyId: "key-desk", revokedAt: revocationRequestedAt }],
+      updateMany: async () => {
+        locallyRevoked = true;
+        calls.push(["local-intent"]);
+        return { count: 1 };
+      },
+    },
+  };
+  const gateway = { revokeKey: async (keyId: string) => { calls.push(["gateway", keyId]); } };
+  const desk = {
+    revokeInstallation: async (input: unknown) => {
+      calls.push(["desk", input]);
+      return true;
+    },
+  };
+  const audit = {
+    transact: async (_action: string, _actorType: string, _actorId: string, mutation: (tx: unknown) => Promise<{ result: unknown }>) =>
+      (await mutation(prisma)).result,
+  };
+  const service = new AdminService(
+    prisma as never,
+    audit as never,
+    {} as never,
+    gateway as never,
+    desk as never,
+  );
+  const actor = { id: "admin-real", email: "admin@example.test", role: AdminRole.ADMIN, orgId: "org-a" };
+  assert.deepEqual(await service.revokeDevice("device-desk", actor), {
+    revoked: 1,
+    deskRevoked: true,
+  });
+  assert.deepEqual(calls, [
+    ["local-intent"],
+    ["gateway", "key-desk"],
+    ["desk", {
+      orgId: "org-a",
+      owner: "member@example.test",
+      installationId: "device-desk",
+      expectedUrl: "https://desk.example.test",
+      allowMissing: false,
+    }],
+  ]);
+  assert.equal(locallyRevoked, true);
+  assert.ok(revocationRequestedAt);
+  assert.ok(revocationCompletedAt);
+  assert.equal(deskBindingCleared, true, "a revoked installation no longer blocks safe binding maintenance");
+});
+
+test("an inconclusive Desk enrollment is cleared only after exact idempotent remote revocation", async () => {
+  let auditTransactions = 0;
+  let bindingCleared = false;
+  let remoteFails = true;
+  let revocationRequestedAt: Date | null = null;
+  let revocationCompletedAt: Date | null = null;
+  const prisma = {
+    device: {
+      findUnique: async () => ({
+        id: "device-pending",
+        orgId: "org-a",
+        deskProvisionedAt: null,
+        deskCleanupPendingAt: new Date(),
+        deskOwner: "member@example.test",
+        deskOrigin: "https://desk.example.test",
+        person: { email: "member@example.test" },
+        revocationRequestedAt,
+        revocationCompletedAt,
+      }),
+      updateMany: async ({ data }: { data: { revocationRequestedAt: Date } }) => {
+        revocationRequestedAt = data.revocationRequestedAt;
+        return { count: 1 };
+      },
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        revocationCompletedAt = data.revocationCompletedAt as Date;
+        bindingCleared = data.deskProvisionedAt === null
+          && data.deskCleanupPendingAt === null
+          && data.deskOwner === null
+          && data.deskOrigin === null;
+        return {};
+      },
+    },
+    deviceToken: {
+      findMany: async () => [],
+      updateMany: async () => ({ count: 0 }),
+    },
+  };
+  const deskCalls: unknown[] = [];
+  const desk = {
+    revokeInstallation: async (input: unknown) => {
+      deskCalls.push(input);
+      if (remoteFails) throw new Error("Desk unavailable");
+      return true;
+    },
+  };
+  const audit = {
+    transact: async (_action: string, _actorType: string, _actorId: string, mutation: (tx: unknown) => Promise<{ result: unknown }>) => {
+      auditTransactions += 1;
+      return (await mutation(prisma)).result;
+    },
+  };
+  const service = new AdminService(
+    prisma as never,
+    audit as never,
+    {} as never,
+    { revokeKey: async () => {} } as never,
+    desk as never,
+  );
+  const actor = { id: "admin-real", email: "admin@example.test", role: AdminRole.ADMIN, orgId: "org-a" };
+
+  await assert.rejects(() => service.revokeDevice("device-pending", actor), /Desk unavailable/);
+  assert.equal(auditTransactions, 1, "the local fail-closed intent is durable before remote I/O");
+  assert.ok(revocationRequestedAt);
+  assert.equal(revocationCompletedAt, null);
+  assert.equal(bindingCleared, false);
+
+  remoteFails = false;
+  assert.deepEqual(await service.revokeDevice("device-pending", actor), {
+    revoked: 0,
+    deskRevoked: true,
+  });
+  assert.equal(auditTransactions, 2);
+  assert.ok(revocationCompletedAt);
+  assert.equal(bindingCleared, true);
+  assert.deepEqual(deskCalls.at(-1), {
+    orgId: "org-a",
+    owner: "member@example.test",
+    installationId: "device-pending",
+    expectedUrl: "https://desk.example.test",
+    allowMissing: true,
+  });
 });

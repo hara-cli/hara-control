@@ -190,6 +190,21 @@ model Device {
   enrolledAt  DateTime @default(now())
   lastSeenAt  DateTime @default(now())
   roleVersion Int      @default(0) // watermark: bumped when this device's resolved role bundle changes
+  // Revocation is two phase. requestedAt is the local fail-closed boundary: every DeviceToken is
+  // marked revoked in the same transaction before Control calls any remote gateway. completedAt is
+  // written only after every gateway key and the exact Desk installation have been revoked.
+  revocationRequestedAt DateTime?
+  revocationCompletedAt DateTime?
+  // Non-secret compensation handle for the separately deployed single-organization Desk. Control
+  // retains no Desk bearer; revocation reuses the server-held organization enrollment credential
+  // and this stable installation identity.
+  deskProvisionedAt DateTime?
+  // Set when Desk registration may have committed but its response and the compensating revoke
+  // were both inconclusive. This fail-closed state blocks service-binding rotation until an admin
+  // retries exact-installation revocation against deskOrigin.
+  deskCleanupPendingAt DateTime?
+  deskOwner         String?
+  deskOrigin        String?
 
   enrollCode   EnrollCode? @relation(fields: [enrollCodeId], references: [id])
   enrollCodeId String?     @unique
@@ -203,6 +218,7 @@ model Device {
 
   @@index([orgId])
   @@index([personId])
+  @@index([revocationRequestedAt, revocationCompletedAt])
 }
 
 /// One organization-wide, reviewable learning pattern. Runtime submissions may add redacted observations,

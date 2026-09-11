@@ -15,6 +15,15 @@ import { PrismaService } from "../prisma/prisma.service";
 import { allowedManagedModels } from "../providers/model-policy";
 import { UsageRange, usageWindow } from "./usage";
 
+export class LiteLLMAdminHttpError extends Error {
+  constructor(
+    readonly endpoint: string,
+    readonly httpStatus: number,
+  ) {
+    super(`LiteLLM ${endpoint} -> HTTP ${httpStatus}`);
+  }
+}
+
 /** LiteLLM accepts compact durations such as `20m`, `30d`, and `600s`. Floor to a whole
  * second so the data-plane token can never outlive the control-plane request boundary. */
 export function liteLLMKeyDuration(expiresAt: Date, now = new Date()): string {
@@ -240,7 +249,7 @@ export class LiteLLMAdapter implements GatewayAdapter {
       });
       if (!res.ok) {
         await res.body?.cancel().catch(() => undefined);
-        throw new Error(`LiteLLM ${path} -> HTTP ${res.status}`);
+        throw new LiteLLMAdminHttpError(path, res.status);
       }
       return (await res.json()) as Record<string, unknown>;
     } finally {
@@ -264,7 +273,7 @@ export class LiteLLMAdapter implements GatewayAdapter {
       // error can include credential-bearing request fragments.
       if (!res.ok) {
         await res.body?.cancel().catch(() => undefined);
-        throw new Error(`LiteLLM ${path} -> HTTP ${res.status}`);
+        throw new LiteLLMAdminHttpError(path, res.status);
       }
       return (await res.json()) as Record<string, unknown>;
     } finally {
@@ -375,7 +384,28 @@ export class LiteLLMAdapter implements GatewayAdapter {
   }
 
   async revokeKey(keyId: string): Promise<void> {
-    await this.call("/key/delete", { key_aliases: [keyId] });
+    try {
+      await this.call("/key/delete", { key_aliases: [keyId] });
+    } catch (error) {
+      if (
+        !(error instanceof LiteLLMAdminHttpError)
+        || error.endpoint !== "/key/delete"
+        || error.httpStatus !== 404
+      ) throw error;
+
+      // LiteLLM 1.92 returns 404 when an alias was already removed by a prior partial revoke. Do
+      // not infer success from the status or its untrusted body: confirm the exact non-secret alias
+      // is absent from the authoritative LiteLLM table. Any DB uncertainty remains fail-closed.
+      const rows = await this.prisma.$queryRaw<Array<{ present: number }>>(
+        Prisma.sql`
+          SELECT 1 AS "present"
+            FROM "litellm"."LiteLLM_VerificationToken"
+           WHERE "key_alias" = ${keyId}
+           LIMIT 1
+        `,
+      );
+      if (rows.length !== 0) throw error;
+    }
   }
 
   async listSpend(keyIds: string[]): Promise<SpendRecord[]> {

@@ -841,7 +841,10 @@
                 </td>
                 <td>
                   <div class="row-actions">
-                    ${d.token_active
+                    ${d.revocation_state === "pending"
+                      ? `<span class="pill pill--warning">${escapeHtml(I18N.t("fleet.revocation_pending"))}</span>
+                         <button type="button" class="btn-danger" data-revoke="${escapeHtml(d.device_id)}">${escapeHtml(I18N.t("fleet.revoke.retry"))}</button>`
+                      : d.token_active
                       ? `<button type="button" class="btn-danger" data-revoke="${escapeHtml(d.device_id)}">${escapeHtml(I18N.t("fleet.revoke"))}</button>`
                       : `<span class="small">${escapeHtml(I18N.t("fleet.revoked"))}</span>`}
                   </div>
@@ -906,11 +909,13 @@
   function renderFleetKeys(device) {
     const keys = Array.isArray(device?.keys) ? device.keys : [];
     if (!keys.length) return `<span class="small">${escapeHtml(I18N.t("fleet.keys.none"))}</span>`;
-    const statusLabel = (status) => I18N.t(`fleet.key.status.${status === "active" || status === "expired" ? status : "revoked"}`);
+    const statusLabel = (status) => I18N.t(`fleet.key.status.${status === "active" || status === "expired" || status === "revocation_pending" ? status : "revoked"}`);
     return `<details class="fleet-key-history"${device.token_active ? "" : " open"}>
       <summary>${escapeHtml(I18N.t("fleet.keys.count", { n: keys.length }))}</summary>
       <div class="fleet-key-history__list">${keys.map((key) => {
-        const lifecycle = key.status === "revoked" && key.revoked_at
+        const lifecycle = key.status === "revocation_pending"
+          ? I18N.t("fleet.key.revocation_pending_since", { date: formatDateTime(device.revocation_requested_at) })
+          : key.status === "revoked" && key.revoked_at
           ? I18N.t("fleet.key.revoked_at", { date: formatDateTime(key.revoked_at) })
           : key.expires_at
             ? I18N.t("fleet.key.expires", { date: formatDateTime(key.expires_at) })

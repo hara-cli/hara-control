@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import {
+  Prisma,
   TenantServiceBinding,
   TenantServiceKind,
   TenantServiceMode,
@@ -60,6 +62,23 @@ export type EnrollmentServiceBinding = Readonly<{
 export type DeskProvisioningTarget = Readonly<{
   url: string;
   enrollKey: Buffer;
+}>;
+
+export type DeskProvisioningResolution = Readonly<{
+  /** Any explicit database row, including a disabled or unhealthy one, shadows legacy env config. */
+  managedConfigured: boolean;
+  target?: DeskProvisioningTarget;
+}>;
+
+export type DeskRevocationResolution = Readonly<{
+  /** Any explicit database row shadows legacy env config, even while unhealthy. */
+  managedConfigured: boolean;
+  target?: DeskProvisioningTarget;
+}>;
+
+export type DeskProvisioningReservation = DeskProvisioningResolution & Readonly<{
+  /** True only after non-secret cleanup provenance is committed on the Control device. */
+  prepared: boolean;
 }>;
 
 function serviceKind(value: string): TenantServiceKind {
@@ -222,50 +241,69 @@ export class TenantServiceBindingsService {
       );
     }
 
-    const existing = await this.prisma.tenantServiceBinding.findUnique({
-      where: { orgId_service: { orgId, service } },
-    });
-    let nextCredentialRef = existing?.credentialRef ?? null;
     let newlyStoredCredentialRef: string | null = null;
     if (credential !== undefined) {
       newlyStoredCredentialRef = `tenant-service.${service}.${randomUUID()}`;
       await this.secrets.put(orgId, newlyStoredCredentialRef, credential);
-      nextCredentialRef = newlyStoredCredentialRef;
     }
 
     let row: TenantServiceBinding;
+    let retiredCredentialRef: string | null = null;
     try {
-      row = await this.prisma.tenantServiceBinding.upsert({
-        where: { orgId_service: { orgId, service } },
-        create: {
-          orgId,
-          service,
-          mode: input.mode,
-          accountRegion: input.accountRegion,
-          apiOrigin,
-          issuer,
-          jwksUri,
-          audience,
-          credentialRef: nextCredentialRef,
-          status: TenantServiceStatus.PENDING_VERIFICATION,
-          capabilitiesVersion: input.capabilitiesVersion ?? 1,
-          configVersion: 1,
-          verifiedAt: null,
-        },
-        update: {
-          mode: input.mode,
-          accountRegion: input.accountRegion,
-          apiOrigin,
-          issuer,
-          jwksUri,
-          audience,
-          credentialRef: nextCredentialRef,
-          status: TenantServiceStatus.PENDING_VERIFICATION,
-          capabilitiesVersion: input.capabilitiesVersion ?? existing?.capabilitiesVersion ?? 1,
-          configVersion: { increment: 1 },
-          verifiedAt: null,
-        },
+      const updated = await this.withServiceBindingLock(orgId, service, async (tx) => {
+        const existing = await tx.tenantServiceBinding.findUnique({
+          where: { orgId_service: { orgId, service } },
+        });
+        if (
+          service === TenantServiceKind.DESK_TASKS
+          && await this.hasProvisionedDeskDevices(orgId, tx)
+        ) {
+          throw new ConflictException(
+            "revoke every provisioned Desk device before changing this organization binding",
+          );
+        }
+        const nextCredentialRef = newlyStoredCredentialRef ?? existing?.credentialRef ?? null;
+        const next = await tx.tenantServiceBinding.upsert({
+          where: { orgId_service: { orgId, service } },
+          create: {
+            orgId,
+            service,
+            mode: input.mode,
+            accountRegion: input.accountRegion,
+            apiOrigin,
+            issuer,
+            jwksUri,
+            audience,
+            credentialRef: nextCredentialRef,
+            status: TenantServiceStatus.PENDING_VERIFICATION,
+            capabilitiesVersion: input.capabilitiesVersion ?? 1,
+            configVersion: 1,
+            verifiedAt: null,
+          },
+          update: {
+            mode: input.mode,
+            accountRegion: input.accountRegion,
+            apiOrigin,
+            issuer,
+            jwksUri,
+            audience,
+            credentialRef: nextCredentialRef,
+            status: TenantServiceStatus.PENDING_VERIFICATION,
+            capabilitiesVersion: input.capabilitiesVersion ?? existing?.capabilitiesVersion ?? 1,
+            configVersion: { increment: 1 },
+            verifiedAt: null,
+          },
+        });
+        return {
+          row: next,
+          retiredCredentialRef: newlyStoredCredentialRef
+            && existing?.credentialRef !== newlyStoredCredentialRef
+            ? existing?.credentialRef ?? null
+            : null,
+        };
       });
+      row = updated.row;
+      retiredCredentialRef = updated.retiredCredentialRef;
     } catch (error) {
       if (newlyStoredCredentialRef) {
         await this.secrets.remove(orgId, newlyStoredCredentialRef).catch(() => undefined);
@@ -275,10 +313,9 @@ export class TenantServiceBindingsService {
 
     if (
       newlyStoredCredentialRef
-      && existing?.credentialRef
-      && existing.credentialRef !== newlyStoredCredentialRef
+      && retiredCredentialRef
     ) {
-      await this.secrets.remove(orgId, existing.credentialRef).catch(() => undefined);
+      await this.secrets.remove(orgId, retiredCredentialRef).catch(() => undefined);
     }
     await this.audit.log(
       orgId,
@@ -331,13 +368,16 @@ export class TenantServiceBindingsService {
       await this.verifyHealth(row);
       if (row.jwksUri) await this.verifyJwks(row.jwksUri);
     } catch (error) {
-      const degraded = await this.prisma.tenantServiceBinding.update({
-        where: { id: row.id },
-        data: {
-          status: TenantServiceStatus.DEGRADED,
-          verifiedAt: null,
-        },
-      });
+      const degraded = await this.commitVerificationResult(
+        row,
+        TenantServiceStatus.DEGRADED,
+        null,
+      );
+      if (!degraded) {
+        throw new ConflictException(
+          "organization service changed while its previous configuration was being verified",
+        );
+      }
       await this.audit.log(
         orgId,
         "tenant-service.verify-failed",
@@ -352,13 +392,16 @@ export class TenantServiceBindingsService {
       throw error;
     }
 
-    const verified = await this.prisma.tenantServiceBinding.update({
-      where: { id: row.id },
-      data: {
-        status: TenantServiceStatus.ACTIVE,
-        verifiedAt: new Date(),
-      },
-    });
+    const verified = await this.commitVerificationResult(
+      row,
+      TenantServiceStatus.ACTIVE,
+      new Date(),
+    );
+    if (!verified) {
+      throw new ConflictException(
+        "organization service changed while its previous configuration was being verified",
+      );
+    }
     await this.audit.log(
       orgId,
       "tenant-service.verify",
@@ -379,14 +422,27 @@ export class TenantServiceBindingsService {
     actor: AuthedUser,
   ): Promise<PublicTenantServiceBinding> {
     const service = serviceKind(rawService);
-    const row = await this.find(orgId, service);
-    const disabled = await this.prisma.tenantServiceBinding.update({
-      where: { id: row.id },
-      data: {
-        status: TenantServiceStatus.DISABLED,
-        configVersion: { increment: 1 },
-        verifiedAt: null,
-      },
+    const disabled = await this.withServiceBindingLock(orgId, service, async (tx) => {
+      const row = await tx.tenantServiceBinding.findUnique({
+        where: { orgId_service: { orgId, service } },
+      });
+      if (!row) throw new NotFoundException("organization service not found");
+      if (
+        service === TenantServiceKind.DESK_TASKS
+        && await this.hasProvisionedDeskDevices(orgId, tx)
+      ) {
+        throw new ConflictException(
+          "revoke every provisioned Desk device before disabling this organization binding",
+        );
+      }
+      return tx.tenantServiceBinding.update({
+        where: { id: row.id },
+        data: {
+          status: TenantServiceStatus.DISABLED,
+          configVersion: { increment: 1 },
+          verifiedAt: null,
+        },
+      });
     });
     await this.audit.log(
       orgId,
@@ -427,6 +483,15 @@ export class TenantServiceBindingsService {
   async deskProvisioningTarget(
     orgId: string,
   ): Promise<DeskProvisioningTarget | undefined> {
+    return (await this.deskProvisioningResolution(orgId)).target;
+  }
+
+  /** Resolve an explicit managed Desk row without ever treating an inactive row as "not configured".
+   * This distinction is what prevents a disabled database binding from silently falling back to a
+   * legacy environment credential. */
+  async deskProvisioningResolution(
+    orgId: string,
+  ): Promise<DeskProvisioningResolution> {
     const row = await this.prisma.tenantServiceBinding.findUnique({
       where: {
         orgId_service: {
@@ -435,20 +500,162 @@ export class TenantServiceBindingsService {
         },
       },
     });
-    if (
-      !row
-      || row.status !== TenantServiceStatus.ACTIVE
-      || !row.credentialRef
-    ) return undefined;
+    if (!row) return Object.freeze({ managedConfigured: false });
+    if (row.status !== TenantServiceStatus.ACTIVE) {
+      return Object.freeze({ managedConfigured: true });
+    }
+    if (!row.credentialRef) {
+      throw new Error("active Hara Desk binding has no enrollment credential reference");
+    }
     const enrollKey = await this.secrets.get(orgId, row.credentialRef);
     if (!enrollKey || enrollKey.length < 1 || enrollKey.length > 4096) {
       enrollKey?.fill(0);
       throw new Error("active Hara Desk binding has no readable enrollment credential");
     }
     return Object.freeze({
-      url: row.apiOrigin,
-      enrollKey,
+      managedConfigured: true,
+      target: Object.freeze({
+        url: row.apiOrigin,
+        enrollKey,
+      }),
     });
+  }
+
+  /** Resolve the credential needed to revoke an already-provisioned installation. Provisioning is
+   * allowed only while ACTIVE, but revocation must remain available while the same binding is
+   * DEGRADED or awaiting verification. The Device's stored origin is an immutable provenance fence:
+   * never decrypt or use a managed credential for a different Desk origin. */
+  async deskRevocationResolution(
+    orgId: string,
+    expectedOrigin: string,
+  ): Promise<DeskRevocationResolution> {
+    const normalizedExpectedOrigin = normalizeUrl(
+      expectedOrigin,
+      "expected Desk origin",
+      true,
+    );
+    if (!normalizedExpectedOrigin) {
+      throw new BadRequestException("expected Desk origin is required for revocation");
+    }
+    const row = await this.prisma.tenantServiceBinding.findUnique({
+      where: {
+        orgId_service: {
+          orgId,
+          service: TenantServiceKind.DESK_TASKS,
+        },
+      },
+    });
+    if (!row) return Object.freeze({ managedConfigured: false });
+    if (row.apiOrigin !== normalizedExpectedOrigin) {
+      throw new ConflictException(
+        "managed Hara Desk binding does not match the enrolled installation origin",
+      );
+    }
+    if (!row.credentialRef) {
+      throw new Error("managed Hara Desk binding has no enrollment credential reference");
+    }
+    const enrollKey = await this.secrets.get(orgId, row.credentialRef);
+    if (!enrollKey || enrollKey.length < 1 || enrollKey.length > 4096) {
+      enrollKey?.fill(0);
+      throw new Error("managed Hara Desk binding has no readable enrollment credential");
+    }
+    return Object.freeze({
+      managedConfigured: true,
+      target: Object.freeze({
+        url: row.apiOrigin,
+        enrollKey,
+      }),
+    });
+  }
+
+  /** Reserve one initial Desk registration under the same database lock used by binding mutation.
+   * The lock is released before credential decryption and all network I/O; the durable Device
+   * pending row then prevents a route or credential rotation until registration is finalized or
+   * explicitly cleaned up. */
+  async reserveDeskProvisioning(input: {
+    orgId: string;
+    deviceId: string;
+    owner: string;
+    preparedAt: Date;
+    legacyOrigin?: string;
+  }): Promise<DeskProvisioningReservation> {
+    const captured = await this.withServiceBindingLock(
+      input.orgId,
+      TenantServiceKind.DESK_TASKS,
+      async (tx) => {
+        const row = await tx.tenantServiceBinding.findUnique({
+          where: {
+            orgId_service: {
+              orgId: input.orgId,
+              service: TenantServiceKind.DESK_TASKS,
+            },
+          },
+        });
+        if (row) {
+          if (row.status !== TenantServiceStatus.ACTIVE) {
+            return { managedConfigured: true, prepared: false } as const;
+          }
+          if (!row.credentialRef) {
+            throw new Error("active Hara Desk binding has no enrollment credential reference");
+          }
+          await tx.device.update({
+            where: { id: input.deviceId },
+            data: {
+              deskProvisionedAt: null,
+              deskCleanupPendingAt: input.preparedAt,
+              deskOwner: input.owner,
+              deskOrigin: row.apiOrigin,
+            },
+          });
+          return {
+            managedConfigured: true,
+            prepared: true,
+            url: row.apiOrigin,
+            credentialRef: row.credentialRef,
+          } as const;
+        }
+        if (!input.legacyOrigin) {
+          return { managedConfigured: false, prepared: false } as const;
+        }
+        await tx.device.update({
+          where: { id: input.deviceId },
+          data: {
+            deskProvisionedAt: null,
+            deskCleanupPendingAt: input.preparedAt,
+            deskOwner: input.owner,
+            deskOrigin: input.legacyOrigin,
+          },
+        });
+        return { managedConfigured: false, prepared: true } as const;
+      },
+    );
+
+    if (!("credentialRef" in captured)) return Object.freeze(captured);
+    const credentialRef = captured.credentialRef;
+    const capturedUrl = captured.url;
+    if (typeof credentialRef !== "string" || typeof capturedUrl !== "string") {
+      throw new Error("active Hara Desk binding reservation is incomplete");
+    }
+    try {
+      const enrollKey = await this.secrets.get(input.orgId, credentialRef);
+      if (!enrollKey || enrollKey.length < 1 || enrollKey.length > 4096) {
+        enrollKey?.fill(0);
+        throw new Error("active Hara Desk binding has no readable enrollment credential");
+      }
+      return Object.freeze({
+        managedConfigured: true,
+        prepared: true,
+        target: Object.freeze({ url: capturedUrl, enrollKey }),
+      });
+    } catch (error) {
+      await this.clearDeskProvisioningReservation({
+        orgId: input.orgId,
+        deviceId: input.deviceId,
+        owner: input.owner,
+        origin: capturedUrl,
+      }).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async requireOrganization(orgId: string): Promise<void> {
@@ -457,6 +664,85 @@ export class TenantServiceBindingsService {
       select: { id: true },
     });
     if (!organization) throw new NotFoundException("organization not found");
+  }
+
+  private async hasProvisionedDeskDevices(
+    orgId: string,
+    tx: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<boolean> {
+    return (await tx.device.count({
+      where: {
+        orgId,
+        OR: [
+          { deskProvisionedAt: { not: null } },
+          { deskCleanupPendingAt: { not: null } },
+        ],
+      },
+    })) > 0;
+  }
+
+  private async clearDeskProvisioningReservation(input: {
+    orgId: string;
+    deviceId: string;
+    owner: string;
+    origin: string;
+  }): Promise<void> {
+    await this.withServiceBindingLock(
+      input.orgId,
+      TenantServiceKind.DESK_TASKS,
+      async (tx) => {
+        await tx.device.updateMany({
+          where: {
+            id: input.deviceId,
+            orgId: input.orgId,
+            deskProvisionedAt: null,
+            deskCleanupPendingAt: { not: null },
+            deskOwner: input.owner,
+            deskOrigin: input.origin,
+          },
+          data: {
+            deskCleanupPendingAt: null,
+            deskOwner: null,
+            deskOrigin: null,
+          },
+        });
+      },
+    );
+  }
+
+  private async commitVerificationResult(
+    probed: TenantServiceBinding,
+    status: TenantServiceStatus,
+    verifiedAt: Date | null,
+  ): Promise<TenantServiceBinding | null> {
+    return this.withServiceBindingLock(probed.orgId, probed.service, async (tx) => {
+      const current = await tx.tenantServiceBinding.findUnique({
+        where: {
+          orgId_service: { orgId: probed.orgId, service: probed.service },
+        },
+      });
+      if (
+        !current
+        || current.id !== probed.id
+        || current.configVersion !== probed.configVersion
+      ) return null;
+      return tx.tenantServiceBinding.update({
+        where: { id: current.id },
+        data: { status, verifiedAt },
+      });
+    });
+  }
+
+  private async withServiceBindingLock<T>(
+    orgId: string,
+    service: TenantServiceKind,
+    operation: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    const lockName = `hara-control:tenant-service:${orgId}:${service}`;
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))`;
+      return operation(tx);
+    });
   }
 
   private async find(
@@ -544,8 +830,14 @@ export class TenantServiceBindingsService {
       MAX_HEALTH_RESPONSE_BYTES,
       "organization service readiness check failed",
     );
+    const deployment = body.deployment && typeof body.deployment === "object" && !Array.isArray(body.deployment)
+      ? body.deployment as Record<string, unknown>
+      : null;
     const valid = row.service === TenantServiceKind.DESK_TASKS
       ? body.ok === true
+        && deployment?.mode === "self-hosted"
+        && deployment?.tenancy === "single-organization"
+        && deployment?.realmId === row.orgId
       : row.service === TenantServiceKind.COLLAB
         ? body.status === "ready" && body.service === "hara-collab"
         : body.status === "ok" || body.status === "ready" || body.ok === true;

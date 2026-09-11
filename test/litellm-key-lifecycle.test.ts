@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import {
   LiteLLMAdapter,
+  LiteLLMAdminHttpError,
   liteLLMKeyDuration,
   liteLLMKeyIssuePayload,
   liteLLMKeyManagementReady,
@@ -307,6 +309,104 @@ test("LiteLLM fails closed and revokes when a non-expiring response omits its ex
     /invalid or unenforced key-policy response/,
   );
   assert.deepEqual(calls, ["/key/generate", "/key/delete"]);
+});
+
+test("LiteLLM revoke treats 404 as success only after the exact alias is authoritatively absent", async () => {
+  let captured: { sql: string; values: unknown[] } | undefined;
+  const absent = new LiteLLMAdapter({
+    $queryRaw: async (query: { sql: string; values: unknown[] }) => {
+      captured = query;
+      return [];
+    },
+  } as never);
+  (absent as any).call = async () => {
+    throw new LiteLLMAdminHttpError("/key/delete", 404);
+  };
+  await assert.doesNotReject(() => absent.revokeKey("device-gone"));
+  assert.ok(captured);
+  assert.deepEqual(captured.values, ["device-gone"]);
+  assert.doesNotMatch(captured.sql, /device-gone/);
+
+  let presentChecks = 0;
+  const stillPresent = new LiteLLMAdapter({
+    $queryRaw: async () => {
+      presentChecks += 1;
+      return [{ present: 1 }];
+    },
+  } as never);
+  (stillPresent as any).call = async () => {
+    throw new LiteLLMAdminHttpError("/key/delete", 404);
+  };
+  await assert.rejects(
+    () => stillPresent.revokeKey("device-still-live"),
+    /LiteLLM \/key\/delete -> HTTP 404/,
+  );
+  assert.equal(presentChecks, 1);
+
+  const unavailable = new LiteLLMAdapter({
+    $queryRaw: async () => { throw new Error("authoritative lookup unavailable"); },
+  } as never);
+  (unavailable as any).call = async () => {
+    throw new LiteLLMAdminHttpError("/key/delete", 404);
+  };
+  await assert.rejects(() => unavailable.revokeKey("device-unknown"), /authoritative lookup unavailable/);
+});
+
+test("LiteLLM revoke follows the real HTTP 404 path without exposing the response body", async () => {
+  const previousUrl = process.env.LITELLM_URL;
+  const previousMasterKey = process.env.LITELLM_MASTER_KEY;
+  let received:
+    | { method: string | undefined; url: string | undefined; authorization: string | undefined; body: string }
+    | undefined;
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      received = {
+        method: request.method,
+        url: request.url,
+        authorization: request.headers.authorization,
+        body: Buffer.concat(chunks).toString("utf8"),
+      };
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ detail: "No keys found", secret: "sk-do-not-expose" }));
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    process.env.LITELLM_URL = `http://127.0.0.1:${address.port}`;
+    process.env.LITELLM_MASTER_KEY = "test-master-key";
+
+    let captured: { sql: string; values: unknown[] } | undefined;
+    const adapter = new LiteLLMAdapter({
+      $queryRaw: async (query: { sql: string; values: unknown[] }) => {
+        captured = query;
+        return [];
+      },
+    } as never);
+
+    await assert.doesNotReject(() => adapter.revokeKey("device-real-http"));
+    assert.deepEqual(received, {
+      method: "POST",
+      url: "/key/delete",
+      authorization: "Bearer test-master-key",
+      body: JSON.stringify({ key_aliases: ["device-real-http"] }),
+    });
+    assert.ok(captured);
+    assert.deepEqual(captured.values, ["device-real-http"]);
+    assert.doesNotMatch(captured.sql, /device-real-http/);
+  } finally {
+    if (previousUrl === undefined) delete process.env.LITELLM_URL;
+    else process.env.LITELLM_URL = previousUrl;
+    if (previousMasterKey === undefined) delete process.env.LITELLM_MASTER_KEY;
+    else process.env.LITELLM_MASTER_KEY = previousMasterKey;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
 });
 
 test("LiteLLM expands an existing device alias in place without requiring the raw virtual key", async () => {

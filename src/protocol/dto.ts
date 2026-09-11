@@ -28,10 +28,21 @@ import {
   MIN_TOKEN_TTL_MINUTES,
 } from "../gateway/key-policy";
 
+export const DESK_AGENT_CLIENT_KINDS = [
+  "nanhara.hara-desktop",
+  "nanhara.hara-cli",
+  "anthropic.claude-code",
+  "openai.codex",
+] as const;
+
 export class DeviceInfoDto {
-  @IsString() @IsNotEmpty() name!: string;
-  @IsString() @IsOptional() os = "";
-  @IsString() @IsOptional() hara_version = "";
+  @IsString() @IsNotEmpty() @MaxLength(120) @Matches(/^[^\u0000-\u001f\u007f]+$/) name!: string;
+  @IsString() @IsOptional() @MaxLength(40) @Matches(/^[^\u0000-\u001f\u007f]*$/) os = "";
+  @IsString() @IsOptional() @MaxLength(40) @Matches(/^[^\u0000-\u001f\u007f]*$/) hara_version = "";
+  // Control provisions the first Desk identity for the client that actually performed enrollment.
+  // Older clients omit this and retain the historical Desktop identity for wire compatibility.
+  @IsString() @IsIn(DESK_AGENT_CLIENT_KINDS) @IsOptional()
+  client_kind = "nanhara.hara-desktop";
 }
 
 export class EnrollDto {
@@ -44,6 +55,17 @@ export class HeartbeatDto {
   @IsString() @IsOptional() name?: string;
   @IsString() @IsOptional() os?: string;
   @IsString() @IsOptional() hara_version?: string;
+}
+
+export class ProvisionDeskAgentDto {
+  @IsString() @IsIn(DESK_AGENT_CLIENT_KINDS) client_kind!: string;
+  // One stable local installation may intentionally host more than one account/runtime of the same
+  // client. The caller supplies a non-secret instance label so retries rotate that exact identity
+  // instead of creating duplicates.
+  @IsString() @IsOptional() @MaxLength(80) @Matches(/^[a-z0-9][a-z0-9._-]*$/)
+  instance_id = "default";
+  @IsString() @IsOptional() @MaxLength(120) @Matches(/^[^\u0000-\u001f\u007f]+$/)
+  name?: string;
 }
 
 export class CreateOrgDto {

@@ -142,8 +142,13 @@ organization-service registry. New deployments should use the administrator UI s
 an independently versioned and visible connection state:
 
 ```env
-HARA_DESK_PROVISIONING_JSON={"<org-id>":{"url":"https://desk.example.com","enrollKey":"<secret>"}}
+HARA_DESK_PROVISIONING_JSON={"<org-id>":{"url":"https://desk.example.com","enrollKey":"<control-only-wildcard-secret>"}}
 ```
+
+The matching Desk uses `DESK_ENROLL_KEYS=*:<control-only-wildcard-secret>`. This is a service-to-service
+credential held only by Control and Desk; never issue it to users or place it in a CLI argument, MCP tool,
+Desktop renderer, browser, or source-controlled file. Control exchanges it for per-device/per-Agent `hdk_`
+credentials after authenticating the organization member.
 
 Store the real JSON in the deployment secret manager or protected `.env`; never commit it. Desk URLs
 must be HTTPS origins (loopback HTTP is allowed only for development), redirects are rejected, and

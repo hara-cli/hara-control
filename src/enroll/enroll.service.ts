@@ -1,8 +1,10 @@
 import {
+  BadRequestException,
   Inject,
   Injectable,
   Logger,
   Optional,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
@@ -15,7 +17,7 @@ import {
   deviceTokenExpiry,
   deviceTokenTtlMinutes,
 } from "../security/token-discipline";
-import { DeviceInfoDto } from "../protocol/dto";
+import { DeviceInfoDto, ProvisionDeskAgentDto } from "../protocol/dto";
 import {
   enrollmentManagedModels,
   managedKeyAuthorizationModels,
@@ -28,7 +30,12 @@ import {
   gatewayLimits,
   parseStoredAccessKeyPolicy,
 } from "../gateway/key-policy";
-import { DeskProvisioner } from "./desk-provisioner";
+import {
+  DeskProvisioner,
+  DeskProvisioningFailure,
+  type DeskProvisioningReceipt,
+  type ProvisionedDeskBinding,
+} from "./desk-provisioner";
 import { TenantServiceBindingsService } from "../service-bindings/service-bindings.service";
 
 @Injectable()
@@ -65,7 +72,7 @@ export class EnrollService {
     // A valid enrollment code without an owning organization indicates damaged control-plane state.
     // Fail before claiming the one-time code so an operator can repair it without rotating the code.
     if (!organization) throw new UnauthorizedException("bad or expired code");
-    if (ec.personId && (!enrollmentPerson || enrollmentPerson.orgId !== ec.orgId)) {
+    if (!ec.personId || !enrollmentPerson || enrollmentPerson.orgId !== ec.orgId) {
       throw new UnauthorizedException("bad or expired code");
     }
     await this.entitlement.seatCheck(ec.orgId); // licensed seat cap
@@ -99,6 +106,10 @@ export class EnrollService {
     let dev: { id: string } | null = null;
     let issued: IssuedKey | null = null;
     let enrollmentAuditRecorded = false;
+    let deskReceipt: DeskProvisioningReceipt | undefined;
+    let provisionedDesk: ProvisionedDeskBinding | undefined;
+    let deskCleanupPrepared = false;
+    const deskOwner = enrollmentPerson.email;
     try {
       dev = await this.prisma.device.create({
         data: {
@@ -148,13 +159,36 @@ export class EnrollService {
       const serviceBindings = await this.serviceBindings?.activeForEnrollment(
         ec.orgId,
       ) ?? [];
-      const desk = await this.deskProvisioner?.provision({
+      deskReceipt = await this.deskProvisioner?.provisionForEnrollment({
         orgId: ec.orgId,
-        owner: enrollmentPerson?.email || device.name,
+        owner: deskOwner,
         deviceName: device.name,
+        installationId: dev.id,
+        platform: device.os || "unknown",
+        version: device.hara_version || "unknown",
+        clientKind: device.client_kind || "nanhara.hara-desktop",
+      }, {
+        controlReservation: { deviceId: dev.id, preparedAt: now },
+        onPrepared: async () => {
+          // The provisioner has already committed exact non-secret provenance under the same
+          // advisory transaction lock used by Desk binding rotation/disable.
+          deskCleanupPrepared = true;
+        },
       });
+      provisionedDesk = deskReceipt?.binding;
+      if (provisionedDesk) {
+        await this.prisma.device.update({
+          where: { id: dev.id },
+          data: {
+            deskProvisionedAt: now,
+            deskCleanupPendingAt: null,
+            deskOwner,
+            deskOrigin: provisionedDesk.url,
+          },
+        });
+      }
 
-      return {
+      const result = {
         device_token: issued.key,
         device_id: dev.id,
         tenant_id: organization.id,
@@ -177,14 +211,61 @@ export class EnrollService {
         ...(serviceBindings.length > 0
           ? { service_bindings: serviceBindings }
           : {}),
-        ...(desk ? { desk } : {}),
+        ...(provisionedDesk ? { desk: provisionedDesk } : {}),
       };
+      // Local device, token and Desk provenance are now committed. The captured Control-only
+      // enrollment credential is no longer needed and must not survive the request lifetime.
+      deskReceipt?.release();
+      deskReceipt = undefined;
+      return result;
     } catch (error) {
       // External key issue + local writes cannot be one database transaction. Compensate every
       // completed boundary so an uncertain failure neither strands an alias nor consumes a code.
       let gatewayRevoked = !issued;
+      let deskRevoked = !deskReceipt
+        && (!(error instanceof DeskProvisioningFailure) || error.compensationConfirmed);
       let deviceRemoved = !dev;
       let codeRestored = false;
+      let deskCleanupPending = deskCleanupPrepared && !deskRevoked;
+      if (
+        dev
+        && error instanceof DeskProvisioningFailure
+        && !error.compensationConfirmed
+        && !deskCleanupPrepared
+      ) {
+        try {
+          // The initial /register may have committed even though neither its response nor the
+          // compensating revoke was observable. Persist the exact non-secret cleanup provenance
+          // before returning failure. It blocks binding rotation and makes admin revocation safely
+          // retry the original Desk; no Agent bearer or enrollment secret is stored here.
+          await this.prisma.device.update({
+            where: { id: dev.id },
+            data: {
+              deskProvisionedAt: null,
+              deskCleanupPendingAt: now,
+              deskOwner,
+              deskOrigin: error.targetUrl,
+            },
+          });
+          deskCleanupPending = true;
+        } catch (cleanupError) {
+          this.log.error(
+            `failed to persist pending Desk cleanup for device ${dev.id}: ${(cleanupError as Error).message}`,
+          );
+        }
+      }
+      if (deskReceipt) {
+        try {
+          // The receipt freezes the exact Desk origin and Control-only credential used for the
+          // registration request. Never re-resolve a mutable organization binding here.
+          await deskReceipt.compensate();
+          deskRevoked = true;
+        } catch (cleanupError) {
+          this.log.error(
+            `failed to compensate Desk installation for device ${dev?.id ?? "uncreated"}: ${(cleanupError as Error).message}`,
+          );
+        }
+      }
       if (issued) {
         try {
           await this.gateway.revokeKey(issued.keyId);
@@ -195,7 +276,7 @@ export class EnrollService {
           );
         }
       }
-      if (dev) {
+      if (dev && gatewayRevoked && deskRevoked) {
         try {
           await this.prisma.device.delete({ where: { id: dev.id } });
           deviceRemoved = true;
@@ -205,17 +286,19 @@ export class EnrollService {
           );
         }
       }
-      try {
-        // Compare against our exact claim timestamp so cleanup cannot release a later claim.
-        const restored = await this.prisma.enrollCode.updateMany({
-          where: { id: ec.id, usedAt: now },
-          data: { usedAt: null },
-        });
-        codeRestored = restored.count === 1;
-      } catch (cleanupError) {
-        this.log.error(
-          `failed to restore enrollment code state for device ${dev?.id ?? "uncreated"}: ${(cleanupError as Error).message}`,
-        );
+      if (gatewayRevoked && deskRevoked && deviceRemoved) {
+        try {
+          // Compare against our exact claim timestamp so cleanup cannot release a later claim.
+          const restored = await this.prisma.enrollCode.updateMany({
+            where: { id: ec.id, usedAt: now },
+            data: { usedAt: null },
+          });
+          codeRestored = restored.count === 1;
+        } catch (cleanupError) {
+          this.log.error(
+            `failed to restore enrollment code state for device ${dev?.id ?? "uncreated"}: ${(cleanupError as Error).message}`,
+          );
+        }
       }
       if (enrollmentAuditRecorded) {
         try {
@@ -226,7 +309,7 @@ export class EnrollService {
             "enroll.rollback",
             "system",
             dev?.id ?? "",
-            { gatewayRevoked, deviceRemoved, codeRestored },
+            { gatewayRevoked, deskRevoked, deskCleanupPending, deviceRemoved, codeRestored },
           );
         } catch (cleanupError) {
           this.log.error(
@@ -236,6 +319,87 @@ export class EnrollService {
       }
       throw error;
     }
+  }
+
+  /** Mint or rotate one separately scoped Desk Agent credential for an already enrolled device.
+   * The device token proves User+Device membership; Control retains the organization enrollment
+   * secret and Desk deterministically maps client+instance retries to the same Agent identity. */
+  async provisionDeskAgent(
+    bearer: string | undefined,
+    input: ProvisionDeskAgentDto,
+  ) {
+    if (!bearer) throw new UnauthorizedException("missing token");
+    const deviceToken = await this.prisma.deviceToken.findUnique({
+      where: { tokenHash: sha256(bearer) },
+      include: {
+        device: {
+          include: { person: { select: { email: true } } },
+        },
+      },
+    });
+    await assertTokenUsable(deviceToken);
+    const device = deviceToken!.device;
+    if (
+      !device.deskProvisionedAt
+      || !device.deskOwner
+      || !device.deskOrigin
+      || !this.deskProvisioner
+    ) {
+      throw new ServiceUnavailableException(
+        "Hara Desk is not provisioned for this organization device",
+      );
+    }
+    const instanceId = input.instance_id?.trim() || "default";
+    if (
+      instanceId !== instanceId.toLowerCase()
+      || instanceId.length > 80
+      || !/^[a-z0-9][a-z0-9._-]*$/.test(instanceId)
+    ) {
+      throw new BadRequestException(
+        "Desk Agent instance must use 1-80 lowercase letters, numbers, dots, underscores, or dashes",
+      );
+    }
+    const provisioned = await this.deskProvisioner.provision({
+      orgId: device.orgId,
+      owner: device.deskOwner,
+      deviceName: device.name,
+      installationId: device.id,
+      platform: device.os || "unknown",
+      version: device.haraVersion || "unknown",
+      clientKind: input.client_kind,
+      instanceId,
+      agentName: input.name?.trim() || `${input.client_kind} · ${device.name}`,
+      expectedUrl: device.deskOrigin,
+    });
+    if (!provisioned) {
+      throw new ServiceUnavailableException(
+        "Hara Desk provisioning is unavailable for this organization",
+      );
+    }
+    // A remote registration can race administrator revocation. Re-check the exact local bearer and
+    // installation after the network call so a late response is never presented as an active Agent
+    // credential after its Control device has already been revoked or detached from this Desk.
+    const currentDeviceToken = await this.prisma.deviceToken.findUnique({
+      where: { tokenHash: sha256(bearer) },
+      include: { device: true },
+    });
+    await assertTokenUsable(currentDeviceToken);
+    const currentDevice = currentDeviceToken!.device;
+    if (
+      currentDevice.id !== device.id
+      || !currentDevice.deskProvisionedAt
+      || currentDevice.deskOwner !== device.deskOwner
+      || currentDevice.deskOrigin !== device.deskOrigin
+    ) {
+      throw new ServiceUnavailableException(
+        "Hara Desk installation changed while the Agent credential was being provisioned",
+      );
+    }
+    return {
+      desk: provisioned,
+      client_kind: input.client_kind,
+      instance_id: instanceId,
+    };
   }
 
   /** Keep a device shown as online + record its current version. Validates the bearer device token. */

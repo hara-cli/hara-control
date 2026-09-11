@@ -1,6 +1,6 @@
 import { Body, Controller, Headers, HttpCode, Post } from "@nestjs/common";
 import { EnrollService } from "./enroll.service";
-import { EnrollDto, HeartbeatDto } from "../protocol/dto";
+import { EnrollDto, HeartbeatDto, ProvisionDeskAgentDto } from "../protocol/dto";
 
 const bearer = (h?: string): string | undefined => (h?.startsWith("Bearer ") ? h.slice(7) : undefined);
 
@@ -19,5 +19,14 @@ export class EnrollController {
   @HttpCode(200)
   async heartbeat(@Headers("authorization") auth: string | undefined, @Body() dto: HeartbeatDto) {
     return this.enroll.heartbeat(bearer(auth), dto);
+  }
+
+  @Post("desk/agents")
+  @HttpCode(200)
+  async provisionDeskAgent(
+    @Headers("authorization") auth: string | undefined,
+    @Body() dto: ProvisionDeskAgentDto,
+  ) {
+    return this.enroll.provisionDeskAgent(bearer(auth), dto);
   }
 }

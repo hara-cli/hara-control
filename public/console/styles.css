@@ -659,6 +659,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   line-height: 1.5;
 }
 .pill--coral { color: var(--coral); border-color: var(--coral); }
+.pill--warning { color: var(--coral); border-color: var(--coral); background: var(--coral-soft); }
 .pill--accent { color: var(--text); border-color: var(--border-strong); }
 .pill--muted { color: var(--muted); }
 .pill--role-SUPERADMIN { color: var(--coral); border-color: var(--coral); }

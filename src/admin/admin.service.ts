@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { AdminRole, OrgUnitType, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
@@ -21,6 +21,7 @@ import {
 } from "../gateway/key-policy";
 import { parseUsageRange, usageWindow } from "../gateway/usage";
 import { assertAdminOrgAccess, AuthedUser } from "../common/admin-auth.guard";
+import { DeskProvisioner } from "../enroll/desk-provisioner";
 
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -31,6 +32,7 @@ export class AdminService {
     private readonly audit: AuditService,
     private readonly orgTree: OrgTreeService,
     @Inject(GATEWAY_ADAPTER) private readonly gateway: GatewayAdapter,
+    @Optional() private readonly deskProvisioner?: DeskProvisioner,
   ) {}
 
   listOrgs(orgId: string | null, global = false) {
@@ -186,13 +188,15 @@ export class AdminService {
       },
       orderBy: { lastSeenAt: "desc" },
     });
-    const tokenIsActive = (token: (typeof devices)[number]["tokens"][number]) =>
-      !token.revokedAt && (!token.expiresAt || token.expiresAt.getTime() > now.getTime());
+    const tokenIsActive = (device: (typeof devices)[number], token: (typeof devices)[number]["tokens"][number]) =>
+      !device.revocationRequestedAt
+      && !token.revokedAt
+      && (!token.expiresAt || token.expiresAt.getTime() > now.getTime());
     const keyIds = devices.flatMap((d) => d.tokens.map((t) => t.gatewayKeyId));
     const spend = new Map((await this.gateway.listSpend(keyIds)).map((s) => [s.keyId, s.spend]));
 
     return devices.map((d) => {
-      const active = d.tokens.find(tokenIsActive);
+      const active = d.tokens.find((token) => tokenIsActive(d, token));
       const current = active ?? d.tokens[0];
       const availableModels = active ? managedModelsForRecordedToken(active.model) : [];
       const keySpend = d.tokens.map((token) => spend.get(token.gatewayKeyId) ?? null);
@@ -207,6 +211,13 @@ export class AdminService {
         hara_version: d.haraVersion,
         last_seen_at: d.lastSeenAt,
         online: now.getTime() - d.lastSeenAt.getTime() < ONLINE_WINDOW_MS,
+        revocation_state: d.revocationCompletedAt
+          ? "completed"
+          : d.revocationRequestedAt
+            ? "pending"
+            : "active",
+        revocation_requested_at: d.revocationRequestedAt,
+        revocation_completed_at: d.revocationCompletedAt,
         token_active: Boolean(active),
         model: current?.model ?? "",
         model_policy_status: active ? (availableModels.length ? "active" : "retired") : "historical",
@@ -224,8 +235,10 @@ export class AdminService {
           key_id: token.gatewayKeyId,
           model: token.model,
           reasoning_effort: token.reasoningEffort || null,
-          status: token.revokedAt
-            ? "revoked"
+          status: d.revocationRequestedAt && !d.revocationCompletedAt
+            ? "revocation_pending"
+            : token.revokedAt
+              ? "revoked"
             : token.expiresAt && token.expiresAt.getTime() <= now.getTime()
               ? "expired"
               : "active",
@@ -491,33 +504,97 @@ export class AdminService {
     };
   }
 
-  /** Revoke every live token for a device — at the gateway and in our registry. */
+  /** Revoke every token for a device. Local access fails closed before any remote I/O; a remote
+   * failure remains visibly pending and a retry idempotently finishes the same operation. */
   async revokeDevice(deviceId: string, user: AuthedUser, now = new Date()) {
-    const dev = await this.prisma.device.findUnique({ where: { id: deviceId } });
+    let dev = await this.prisma.device.findUnique({
+      where: { id: deviceId },
+      include: { person: { select: { email: true } } },
+    });
     if (!dev) return { revoked: 0 };
     assertAdminOrgAccess(user, dev.orgId);
-    const tokens = await this.prisma.deviceToken.findMany({ where: { deviceId, revokedAt: null } });
-    // Remote revocation is the security boundary. Never claim or persist local success while any gateway
-    // key may still consume quota. A partial remote failure leaves local rows active and the request failed,
-    // making the operation safely retryable instead of producing a false-green fleet view.
+    const actorType = user.viaSharedKey ? "shared-key" : "admin";
+
+    if (!dev.revocationRequestedAt) {
+      await this.audit.transact(
+        "device.revocation_requested",
+        actorType,
+        user.id,
+        async (tx) => {
+          const claimed = await tx.device.updateMany({
+            where: { id: deviceId, revocationRequestedAt: null },
+            data: { revocationRequestedAt: now },
+          });
+          const local = await tx.deviceToken.updateMany({
+            where: { deviceId, revokedAt: null },
+            data: { revokedAt: now },
+          });
+          return {
+            result: { claimed: claimed.count === 1, revoked: local.count },
+            orgId: dev!.orgId,
+            payload: { deviceId, claimed: claimed.count === 1, tokens: local.count },
+          };
+        },
+      );
+    }
+
+    // Re-read after the serializable intent transaction. All subsequently authenticated Control
+    // requests now observe revokedAt and fail, even if a remote gateway or Desk is unavailable.
+    dev = await this.prisma.device.findUnique({
+      where: { id: deviceId },
+      include: { person: { select: { email: true } } },
+    });
+    if (!dev) return { revoked: 0 };
+    const tokens = await this.prisma.deviceToken.findMany({ where: { deviceId } });
+    if (dev.revocationCompletedAt) {
+      return { revoked: tokens.length, deskRevoked: false };
+    }
+
+    // Remote calls are intentionally idempotent. A partial failure leaves the durable pending state
+    // in place, and retry revokes every known key again rather than guessing where the prior run stopped.
     for (const t of tokens) {
       await this.gateway.revokeKey(t.gatewayKeyId);
     }
+    let deskRevoked = false;
+    if (dev.deskProvisionedAt || dev.deskCleanupPendingAt) {
+      if (!this.deskProvisioner || !dev.deskOwner || !dev.deskOrigin) {
+        throw new Error("Hara Desk revocation is unavailable for this provisioned device");
+      }
+      await this.deskProvisioner.revokeInstallation({
+        orgId: dev.orgId,
+        owner: dev.deskOwner,
+        installationId: dev.id,
+        expectedUrl: dev.deskOrigin,
+        // A failed initial registration may genuinely be absent remotely; only its explicit
+        // pending-cleanup state is allowed to accept Desk's idempotent "missing" response.
+        allowMissing: Boolean(dev.deskCleanupPendingAt && !dev.deskProvisionedAt),
+      });
+      deskRevoked = true;
+    }
     return this.audit.transact(
-      "device.revoke",
-      user.viaSharedKey ? "shared-key" : "admin",
+      "device.revocation_completed",
+      actorType,
       user.id,
       async (tx) => {
-        const revoked = tokens.length
-          ? await tx.deviceToken.updateMany({
-              where: { id: { in: tokens.map((token) => token.id) }, deviceId, revokedAt: null },
-              data: { revokedAt: now },
-            })
-          : { count: 0 };
+        const completedAt = dev.revocationRequestedAt && now < dev.revocationRequestedAt
+          ? dev.revocationRequestedAt
+          : now;
+        await tx.device.update({
+          where: { id: deviceId },
+          data: {
+            revocationCompletedAt: completedAt,
+            ...(deskRevoked ? {
+              deskProvisionedAt: null,
+              deskCleanupPendingAt: null,
+              deskOwner: null,
+              deskOrigin: null,
+            } : {}),
+          },
+        });
         return {
-          result: { revoked: revoked.count },
+          result: { revoked: tokens.length, deskRevoked },
           orgId: dev.orgId,
-          payload: { deviceId, tokens: revoked.count },
+          payload: { deviceId, tokens: tokens.length, deskRevoked },
         };
       },
     );

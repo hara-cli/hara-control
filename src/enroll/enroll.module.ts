@@ -8,5 +8,6 @@ import { TenantServiceBindingsModule } from "../service-bindings/service-binding
   imports: [TenantServiceBindingsModule],
   controllers: [EnrollController],
   providers: [EnrollService, DeskProvisioner],
+  exports: [DeskProvisioner],
 })
 export class EnrollModule {}
